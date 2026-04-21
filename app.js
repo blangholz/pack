@@ -436,7 +436,14 @@ function gearCard(gear) {
     h('div', { class: 'gear-name' }, gear.name || 'Unnamed'),
     h('div', { class: 'gear-sub' },
       gear.brand ? h('span', {}, gear.brand) : null,
-      gear.url ? h('span', {}, escapeHost(gear.url) || 'link') : null,
+      gear.url ? h('a', {
+        href: gear.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        class: 'gear-sub-link',
+        onclick: (e) => e.stopPropagation(),
+        ondragstart: (e) => e.preventDefault(),
+      }, escapeHost(gear.url) || 'link') : null,
     ),
   );
 
