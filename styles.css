@@ -1095,7 +1095,7 @@ img.brand-badge-logo {
 }
 .item-qty-input::-webkit-outer-spin-button,
 .item-qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.item-qty-owned { font-size: 11px; margin-left: 2px; }
+.item-qty-owned { font-size: 11px; margin-left: 2px; margin-right: 10px; }
 
 /* ============ Global drop overlay ============ */
 .global-drop-overlay {
