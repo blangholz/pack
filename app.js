@@ -1239,32 +1239,46 @@ function resetScreenshotUI() {
   const dz = $('#screenshot-dropzone');
   dz.querySelector('.dropzone-idle').classList.remove('hidden');
   dz.querySelector('.dropzone-preview').classList.add('hidden');
-  dz.querySelector('.dropzone-loading').classList.add('hidden');
   $('#screenshot-preview').removeAttribute('src');
+  setScreenshotProgress(null);
 }
 
 function setScreenshotState(which) {
   const dz = $('#screenshot-dropzone');
   dz.querySelector('.dropzone-idle').classList.toggle('hidden', which !== 'idle');
   dz.querySelector('.dropzone-preview').classList.toggle('hidden', which !== 'preview');
-  dz.querySelector('.dropzone-loading').classList.toggle('hidden', which !== 'loading');
+}
+
+function setScreenshotProgress(text) {
+  const wrap = $('#screenshot-progress');
+  const label = $('#screenshot-status');
+  if (!text) {
+    wrap.classList.add('hidden');
+    label.textContent = '';
+    return;
+  }
+  label.textContent = text;
+  wrap.classList.remove('hidden');
 }
 
 async function handleScreenshotFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
   if ($('#gear-modal').classList.contains('hidden')) openAddGear();
   try {
+    setScreenshotProgress('Preparing screenshot…');
     const { base64, mediaType, dataUrl } = await fileToResizedDataUrl(file);
     $('#screenshot-preview').src = dataUrl;
-    setScreenshotState('loading');
-    $('#screenshot-status').textContent = 'Reading the screenshot…';
+    setScreenshotState('preview');
+    setScreenshotProgress('Reading the screenshot with Claude…');
+    $('#fetch-status').textContent = '';
     const data = await callExtractGear({ image: { base64, mediaType } });
     applyExtracted(data);
-    setScreenshotState('preview');
+    setScreenshotProgress(null);
     $('#fetch-status').textContent = 'Filled in what we could see — review and save.';
   } catch (err) {
+    setScreenshotProgress(null);
     setScreenshotState($('#screenshot-preview').getAttribute('src') ? 'preview' : 'idle');
-    $('#fetch-status').textContent = err.message;
+    $('#fetch-status').textContent = err.message || 'Could not read the screenshot.';
   }
 }
 

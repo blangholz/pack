@@ -142,11 +142,13 @@
           </div>
           <div class="dropzone-preview hidden">
             <img id="screenshot-preview" alt="Screenshot preview" />
-            <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
-          </div>
-          <div class="dropzone-loading hidden">
-            <div class="spinner"></div>
-            <div id="screenshot-status">Analyzing screenshot…</div>
+            <div class="dropzone-preview-row">
+              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
+                <span class="spinner-sm" aria-hidden="true"></span>
+                <span id="screenshot-status">Reading the screenshot…</span>
+              </div>
+              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+            </div>
           </div>
         </div>
         <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
