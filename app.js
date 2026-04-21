@@ -5,27 +5,18 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.4';
 // ------------------------------------------------------------------
 const { SUPABASE_URL, SUPABASE_ANON_KEY } = (window.ENV || {});
 
-const $ = (id) => document.getElementById(id);
-const statusEl = $('status');
-const authStatusEl = $('auth-status');
-
-function setStatus(el, msg, kind) {
-  if (!el) return;
-  el.textContent = msg || '';
-  el.classList.toggle('error', kind === 'error');
-  el.classList.toggle('ok', kind === 'ok');
-}
+const $ = (sel, root = document) => (typeof sel === 'string' && sel.startsWith('#')
+  ? root.querySelector(sel)
+  : root.querySelector('#' + sel));
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  setStatus(authStatusEl, 'Missing SUPABASE env vars.', 'error');
+  document.body.innerHTML = '<p style="padding:24px;color:#f87171;">Missing SUPABASE env vars.</p>';
   throw new Error('missing-env');
 }
 
-// Use implicit flow for magic links: Supabase appends the access/refresh
-// tokens in the URL hash after redirect, so no PKCE code_verifier is needed.
-// (PKCE breaks if the link is opened in a different browser/tab from the one
-// that requested it, or if localStorage was cleared in between — which is what
-// caused the previous post-click loop back to the email entry screen.)
+// Implicit flow — magic-link redirects put tokens in the URL hash (no PKCE
+// code_verifier needed, which would break across browsers/clients).
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
@@ -63,114 +54,242 @@ function readHashError() {
 }
 
 // ------------------------------------------------------------------
-// State
+// Constants
 // ------------------------------------------------------------------
 const LS_UNIT_KEY = 'pack.displayUnit';
+const UNIT_CYCLE = ['g', 'kg', 'oz', 'lb'];
 
+const WEATHER_TYPES = [
+  { id: 'sunny', label: 'Sunny', emoji: '🌞' },
+  { id: 'cold',  label: 'Cold',  emoji: '❄️' },
+  { id: 'rain',  label: 'Rain',  emoji: '🌧' },
+  { id: 'snow',  label: 'Snow',  emoji: '🌨' },
+];
+
+// Known outdoor / climbing / paragliding brand palettes. Keys are lowercase.
+const BRAND_STYLES = {
+  'black diamond':      { abbr: 'BD',  bg: '#0a0a0a', fg: '#FFC82E' },
+  'patagonia':          { abbr: 'P',   bg: '#0B3C5D', fg: '#F4B942' },
+  'arc\'teryx':         { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF' },
+  'arcteryx':           { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF' },
+  'the north face':     { abbr: 'TNF', bg: '#000000', fg: '#E8492D' },
+  'north face':         { abbr: 'TNF', bg: '#000000', fg: '#E8492D' },
+  'rei':                { abbr: 'REI', bg: '#006241', fg: '#FFFFFF' },
+  'rei co-op':          { abbr: 'REI', bg: '#006241', fg: '#FFFFFF' },
+  'mountain hardwear':  { abbr: 'MH',  bg: '#1B4E8C', fg: '#FFFFFF' },
+  'mammut':             { abbr: 'Mm',  bg: '#E4002B', fg: '#FFFFFF' },
+  'salewa':             { abbr: 'Sa',  bg: '#E30613', fg: '#FFFFFF' },
+  'petzl':              { abbr: 'Pz',  bg: '#F28C00', fg: '#000000' },
+  'osprey':             { abbr: 'Os',  bg: '#00857A', fg: '#FFFFFF' },
+  'gregory':            { abbr: 'Gr',  bg: '#2E4E3F', fg: '#FFFFFF' },
+  'msr':                { abbr: 'MSR', bg: '#E60023', fg: '#FFFFFF' },
+  'smartwool':          { abbr: 'SW',  bg: '#D7282F', fg: '#FFFFFF' },
+  'la sportiva':        { abbr: 'LS',  bg: '#FFC200', fg: '#000000' },
+  'scarpa':             { abbr: 'Sc',  bg: '#E4032E', fg: '#FFFFFF' },
+  'hyperlite mountain gear': { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000' },
+  'hyperlite':          { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000' },
+  'zpacks':             { abbr: 'Zp',  bg: '#2E7D32', fg: '#FFFFFF' },
+  'ortovox':            { abbr: 'Ov',  bg: '#1F7A33', fg: '#FFFFFF' },
+  'mystery ranch':      { abbr: 'MR',  bg: '#2F2F2F', fg: '#F28C00' },
+  'dmm':                { abbr: 'DMM', bg: '#ED1C24', fg: '#FFFFFF' },
+  'edelrid':            { abbr: 'Ed',  bg: '#FFC220', fg: '#000000' },
+  'fjallraven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF' },
+  'fjällräven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF' },
+  'columbia':           { abbr: 'Co',  bg: '#1B365C', fg: '#FFFFFF' },
+  'marmot':             { abbr: 'Mt',  bg: '#1A1A1A', fg: '#F28C00' },
+  'outdoor research':   { abbr: 'OR',  bg: '#3A4A5C', fg: '#FFFFFF' },
+  'sea to summit':      { abbr: 'S2S', bg: '#00A9CE', fg: '#FFFFFF' },
+  'therm-a-rest':       { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D' },
+  'thermarest':         { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D' },
+  'nemo':               { abbr: 'Ne',  bg: '#FF6B00', fg: '#FFFFFF' },
+  'big agnes':          { abbr: 'BA',  bg: '#006633', fg: '#FFFFFF' },
+  'garmin':             { abbr: 'Ga',  bg: '#000000', fg: '#007CC3' },
+  'gopro':              { abbr: 'GP',  bg: '#000000', fg: '#FFFFFF' },
+  'ozone':              { abbr: 'Oz',  bg: '#000000', fg: '#FFCC00' },
+  'advance':            { abbr: 'Ad',  bg: '#E4002B', fg: '#FFFFFF' },
+  'icaro':              { abbr: 'Ic',  bg: '#0055A5', fg: '#FFFFFF' },
+  'skywalk':            { abbr: 'Sk',  bg: '#003DA5', fg: '#FFFFFF' },
+  'gin gliders':        { abbr: 'Gin', bg: '#E30613', fg: '#FFFFFF' },
+  'niviuk':             { abbr: 'Nv',  bg: '#F28C00', fg: '#000000' },
+  'supair':             { abbr: 'Sp',  bg: '#003B5C', fg: '#FFFFFF' },
+  'gibbon':             { abbr: 'Gb',  bg: '#FF6B00', fg: '#FFFFFF' },
+  'balance community':  { abbr: 'BC',  bg: '#228B22', fg: '#FFFFFF' },
+  'slackline industries': { abbr: 'SLI', bg: '#FF4500', fg: '#FFFFFF' },
+};
+
+// ------------------------------------------------------------------
+// State (module-level)
+// ------------------------------------------------------------------
 let currentUser = null;
 let gearList = [];
 let activities = [];
-let itemsByActivity = {}; // activityId -> items[]
-let customFiltersByActivity = {}; // activityId -> custom_filters[]
+let itemsByActivity = {};             // activity_id -> array of activity_items rows
+let customFiltersByActivity = {};     // activity_id -> array of custom_filters rows
 let activeActivityId = null;
 let displayUnit = localStorage.getItem(LS_UNIT_KEY) || 'g';
-let gearSearch = '';
-let gearEditMode = false;
-let editingGearId = null;
-let customFilterEditMode = false;
-
-const WEATHERS = [
-  { id: 'sunny', label: 'Sunny', emoji: '☀️' },
-  { id: 'cold',  label: 'Cold',  emoji: '🥶' },
-  { id: 'rain',  label: 'Rain',  emoji: '🌧️' },
-  { id: 'snow',  label: 'Snow',  emoji: '❄️' },
-];
+let gearSearchQuery = '';
+let brandFilter = null;               // lowercase brand label, or null
+let libraryEditMode = false;
+let editingGearId = null;             // null = adding
+let editingActivityId = null;         // null = adding
+let dragState = null;
 
 // ------------------------------------------------------------------
-// Weight helpers
+// DOM helpers
 // ------------------------------------------------------------------
-const UNIT_TO_GRAMS = { g: 1, kg: 1000, oz: 28.3495, lb: 453.592 };
-
-function gramsToUnit(g, unit) {
-  if (g == null) return null;
-  return g / UNIT_TO_GRAMS[unit];
-}
-function unitToGrams(v, unit) {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  return n * UNIT_TO_GRAMS[unit];
-}
-function formatWeight(g, unit = displayUnit) {
-  if (g == null) return '';
-  const v = gramsToUnit(g, unit);
-  const rounded = unit === 'g' ? Math.round(v) : Number(v.toFixed(2));
-  return `${rounded} ${unit}`;
-}
-
-// ------------------------------------------------------------------
-// Auth view
-// ------------------------------------------------------------------
-const authView = $('auth-view');
-const mainView = $('main-view');
-const authForm = $('auth-form');
-const authEmail = $('auth-email');
-const authSubmit = $('auth-submit');
-
-authForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const email = authEmail.value.trim();
-  if (!email) return;
-  authSubmit.disabled = true;
-  setStatus(authStatusEl, 'Sending magic link…');
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: window.location.origin,
-      shouldCreateUser: true,
-    },
-  });
-  authSubmit.disabled = false;
-  if (error) {
-    setStatus(authStatusEl, `Could not send: ${error.message}`, 'error');
-    return;
+function h(tag, props = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'dataset') Object.assign(el.dataset, v);
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (v === true) el.setAttribute(k, '');
+    else if (v !== false && v != null) el.setAttribute(k, v);
   }
-  setStatus(
-    authStatusEl,
-    `Check ${email} — click the link to sign in. You can close this tab.`,
-    'ok'
-  );
-});
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    if (Array.isArray(c)) {
+      for (const cc of c) {
+        if (cc == null || cc === false) continue;
+        el.appendChild(typeof cc === 'string' ? document.createTextNode(cc) : cc);
+      }
+    } else {
+      el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+  }
+  return el;
+}
 
-$('sign-out-btn').addEventListener('click', async () => {
-  await supabase.auth.signOut();
-});
+function escapeHost(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return null; }
+}
 
+function gearImageEl(url, { className = '', alt = '' } = {}) {
+  if (!url) return h('div', { class: ('placeholder-img ' + className).trim() }, '🎒');
+  const img = h('img', { src: url, alt, class: className });
+  let retriedProxy = false;
+  img.addEventListener('error', () => {
+    if (!retriedProxy && !url.startsWith('https://images.weserv.nl/')) {
+      retriedProxy = true;
+      img.src = 'https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//, ''));
+      return;
+    }
+    img.replaceWith(h('div', { class: ('placeholder-img ' + className).trim() }, '🎒'));
+  });
+  return img;
+}
+
+// ------------------------------------------------------------------
+// Unit conversion
+// ------------------------------------------------------------------
+const UNIT_TO_G = { g: 1, kg: 1000, oz: 28.3495, lb: 453.592 };
+
+function gramsToUnit(grams, unit) {
+  if (grams == null || isNaN(grams)) return null;
+  return grams / UNIT_TO_G[unit];
+}
+function unitToGrams(value, unit) {
+  if (value == null || value === '' || isNaN(value)) return null;
+  return Number(value) * UNIT_TO_G[unit];
+}
+function formatWeight(grams, unit = displayUnit) {
+  if (grams == null || isNaN(grams)) return '—';
+  const v = gramsToUnit(grams, unit);
+  const decimals = (unit === 'g') ? 0 : (unit === 'kg' || unit === 'lb') ? 2 : 1;
+  return `${v.toFixed(decimals)} ${unit}`;
+}
+
+// ------------------------------------------------------------------
+// Brand styling
+// ------------------------------------------------------------------
+function brandAbbrFallback(name) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return words.map((w) => w[0]).join('').slice(0, 3).toUpperCase();
+}
+function hashHue(str) {
+  let x = 0;
+  for (let i = 0; i < str.length; i++) x = (x * 31 + str.charCodeAt(i)) >>> 0;
+  return x % 360;
+}
+function brandStyle(brand) {
+  if (!brand) return null;
+  const key = brand.trim().toLowerCase();
+  if (BRAND_STYLES[key]) return BRAND_STYLES[key];
+  const hue = hashHue(key);
+  return {
+    abbr: brandAbbrFallback(brand),
+    bg: `hsl(${hue} 55% 32%)`,
+    fg: '#ffffff',
+  };
+}
+function brandBadgeEl(brand, { title } = {}) {
+  const s = brandStyle(brand);
+  if (!s) return null;
+  return h('span', {
+    class: 'brand-badge',
+    style: `background: ${s.bg}; color: ${s.fg};`,
+    title: title || brand,
+  }, s.abbr);
+}
+
+// ------------------------------------------------------------------
+// Toast
+// ------------------------------------------------------------------
+let toastTimeout = null;
+function toast(message, kind = '') {
+  const el = $('#toast');
+  if (!el) return;
+  el.textContent = message;
+  el.className = `toast show ${kind}`.trim();
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    el.className = 'toast hidden';
+  }, 3200);
+}
+
+// ------------------------------------------------------------------
+// Auth view / main view toggling
+// ------------------------------------------------------------------
 function showAuth() {
-  mainView.hidden = true;
-  authView.hidden = false;
+  $('#auth-view').hidden = false;
+  $('#main-view').hidden = true;
 }
 function showMain() {
-  authView.hidden = true;
-  mainView.hidden = false;
+  $('#auth-view').hidden = true;
+  $('#main-view').hidden = false;
+}
+
+function setAuthStatus(msg, kind) {
+  const el = $('#auth-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('error', kind === 'error');
+  el.classList.toggle('ok', kind === 'ok');
+}
+function setStatus(msg, kind) {
+  const el = $('#status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('error', kind === 'error');
+  el.classList.toggle('ok', kind === 'ok');
 }
 
 // ------------------------------------------------------------------
-// Data loading
+// Supabase data layer
 // ------------------------------------------------------------------
 async function loadAll() {
-  setStatus(statusEl, 'Loading…');
+  setStatus('Loading…');
   const [gearRes, actRes, itemRes, filterRes] = await Promise.all([
     supabase.from('gear').select('*').order('created_at', { ascending: false }),
     supabase.from('activities').select('*').order('position', { ascending: true }),
     supabase.from('activity_items').select('*').order('position', { ascending: true }),
     supabase.from('custom_filters').select('*').order('position', { ascending: true }),
   ]);
-  if (gearRes.error) return setStatus(statusEl, `Load gear: ${gearRes.error.message}`, 'error');
-  if (actRes.error) return setStatus(statusEl, `Load activities: ${actRes.error.message}`, 'error');
-  if (itemRes.error) return setStatus(statusEl, `Load items: ${itemRes.error.message}`, 'error');
-  if (filterRes.error) return setStatus(statusEl, `Load filters: ${filterRes.error.message}`, 'error');
-
+  for (const [name, res] of [['gear', gearRes], ['activities', actRes], ['items', itemRes], ['filters', filterRes]]) {
+    if (res.error) { setStatus(`Load ${name}: ${res.error.message}`, 'error'); return; }
+  }
   gearList = gearRes.data || [];
   activities = actRes.data || [];
   itemsByActivity = {};
@@ -184,744 +303,869 @@ async function loadAll() {
   if (!activeActivityId || !activities.some((a) => a.id === activeActivityId)) {
     activeActivityId = activities[0]?.id || null;
   }
-  setStatus(statusEl, '');
+  setStatus('');
   render();
+}
+
+function activeActivity() {
+  return activities.find((a) => a.id === activeActivityId) || null;
+}
+function itemsFor(activityId) {
+  return itemsByActivity[activityId] || [];
+}
+function customFiltersFor(activityId) {
+  return customFiltersByActivity[activityId] || [];
 }
 
 // ------------------------------------------------------------------
 // Rendering
 // ------------------------------------------------------------------
 function render() {
+  renderLibrary();
   renderTabs();
-  renderActivityBody();
-  renderGearList();
-  $('gear-weight-unit').textContent = displayUnit;
+  renderCustomFilterBar();
+  renderWeatherFilter();
+  renderActivity();
+  renderUnitToggle();
+  $('#gear-weight-unit').textContent = displayUnit;
+}
+
+function renderUnitToggle() {
+  $('#unit-toggle').textContent = displayUnit;
+}
+
+function renderLibrary() {
+  const list = $('#gear-list');
+  const empty = $('#gear-empty');
+  const count = $('#gear-count');
+  const editToggle = $('#library-edit-toggle');
+  list.innerHTML = '';
+
+  renderBrandFilters();
+
+  // If the currently-filtered brand no longer exists, clear it.
+  if (brandFilter && !gearList.some((g) => (g.brand || '').trim().toLowerCase() === brandFilter)) {
+    brandFilter = null;
+  }
+
+  const q = gearSearchQuery.trim().toLowerCase();
+  let items = gearList;
+  if (q) {
+    items = items.filter((g) =>
+      (g.name || '').toLowerCase().includes(q) ||
+      (g.brand || '').toLowerCase().includes(q) ||
+      (g.notes || '').toLowerCase().includes(q));
+  }
+  if (brandFilter) {
+    items = items.filter((g) => (g.brand || '').trim().toLowerCase() === brandFilter);
+  }
+
+  count.textContent = gearList.length ? `${gearList.length}` : '';
+
+  if (!gearList.length && libraryEditMode) libraryEditMode = false;
+  list.classList.toggle('edit-mode', libraryEditMode);
+  editToggle.textContent = libraryEditMode ? 'Done' : 'Edit';
+  editToggle.setAttribute('aria-pressed', libraryEditMode ? 'true' : 'false');
+  editToggle.disabled = !gearList.length;
+
+  if (!gearList.length) {
+    empty.classList.remove('hidden');
+    list.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  list.classList.remove('hidden');
+
+  for (const gear of items) {
+    list.appendChild(gearCard(gear));
+  }
+}
+
+function renderBrandFilters() {
+  const host = $('#brand-filter-pills');
+  host.innerHTML = '';
+
+  const counts = new Map();
+  for (const g of gearList) {
+    const label = (g.brand || '').trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    const entry = counts.get(key) || { label, count: 0 };
+    entry.count++;
+    counts.set(key, entry);
+  }
+
+  if (counts.size < 2) {
+    host.classList.add('hidden');
+    return;
+  }
+  host.classList.remove('hidden');
+
+  const entries = Array.from(counts.entries()).sort((a, b) => b[1].count - a[1].count);
+  for (const [key, { label, count }] of entries) {
+    const active = brandFilter === key;
+    const pill = h('button', {
+      class: 'brand-pill' + (active ? ' active' : ''),
+      type: 'button',
+      'aria-pressed': active ? 'true' : 'false',
+      title: active ? 'Clear filter' : `Show only ${label}`,
+      onclick: () => {
+        brandFilter = active ? null : key;
+        renderLibrary();
+      },
+    },
+      brandBadgeEl(label),
+      h('span', {}, label),
+      h('span', { class: 'brand-pill-count' }, String(count)),
+    );
+    host.appendChild(pill);
+  }
+}
+
+function gearCard(gear) {
+  const img = gearImageEl(gear.image_url);
+  const weight = h('div', { class: 'gear-weight' }, formatWeight(gear.weight_grams));
+  const badge = brandBadgeEl(gear.brand);
+  const ownedQty = Number.isFinite(gear.quantity) && gear.quantity >= 1 ? gear.quantity : 1;
+  const qtyBadge = ownedQty > 1
+    ? h('div', { class: 'gear-qty-badge', title: `You own ${ownedQty}` }, `×${ownedQty}`)
+    : null;
+  const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight);
+
+  const meta = h('div', { class: 'gear-meta' },
+    h('div', { class: 'gear-name' }, gear.name || 'Unnamed'),
+    h('div', { class: 'gear-sub' },
+      gear.brand ? h('span', {}, gear.brand) : null,
+      gear.url ? h('span', {}, escapeHost(gear.url) || 'link') : null,
+    ),
+  );
+
+  const cardProps = { class: 'gear-card', dataset: { gearId: gear.id } };
+  if (!libraryEditMode) {
+    cardProps.draggable = 'true';
+    cardProps.onclick = () => openEditGear(gear.id);
+    cardProps.ondragstart = (e) => handleGearDragStart(e, gear.id);
+    cardProps.ondragend = handleDragEnd;
+  }
+
+  const children = [img, meta, right];
+  if (libraryEditMode) {
+    const actions = h('div', { class: 'gear-card-actions' },
+      h('button', {
+        class: 'btn btn-ghost btn-sm',
+        type: 'button',
+        onclick: (e) => { e.stopPropagation(); openEditGear(gear.id); },
+      }, 'Edit details'),
+      h('button', {
+        class: 'btn btn-danger btn-sm',
+        type: 'button',
+        onclick: (e) => { e.stopPropagation(); handleInlineDeleteGear(gear.id); },
+      }, 'Delete'),
+    );
+    children.push(actions);
+  }
+  return h('div', cardProps, ...children);
 }
 
 function renderTabs() {
-  const el = $('activity-tabs');
-  el.innerHTML = '';
+  const tabs = $('#activity-tabs');
+  tabs.innerHTML = '';
   for (const a of activities) {
-    const b = document.createElement('button');
-    b.className = 'activity-tab' + (a.id === activeActivityId ? ' active' : '');
-    b.textContent = `${a.emoji ? a.emoji + ' ' : ''}${a.name}`;
-    b.addEventListener('click', () => {
-      activeActivityId = a.id;
-      customFilterEditMode = false;
-      render();
-    });
-    wireDropTarget(b, () => a.id);
-    el.appendChild(b);
+    const tab = h('button', {
+      class: 'activity-tab' + (a.id === activeActivityId ? ' active' : ''),
+      dataset: { activityId: a.id },
+      role: 'tab',
+      onclick: () => { activeActivityId = a.id; render(); },
+      ondblclick: () => openEditActivity(a.id),
+      ondragover: handleTabDragOver,
+      ondragleave: handleTabDragLeave,
+      ondrop: (e) => handleTabDrop(e, a.id),
+    },
+      a.emoji ? h('span', { class: 'activity-tab-emoji' }, a.emoji) : null,
+      h('span', {}, a.name),
+    );
+    tabs.appendChild(tab);
   }
-  const add = document.createElement('button');
-  add.className = 'activity-tab activity-tab-new';
-  add.textContent = '+ New';
-  add.addEventListener('click', addActivityPrompt);
-  el.appendChild(add);
+  const addBtn = h('button', {
+    class: 'activity-tab activity-tab-add',
+    onclick: () => openNewActivity(),
+    title: 'Add activity',
+  }, '+');
+  tabs.appendChild(addBtn);
 }
 
-function itemPassesFilters(item, activity) {
-  const activeWeathers = activity.active_weathers || [];
-  if (activeWeathers.length) {
-    const tags = item.weather_tags || [];
-    if (tags.length && !tags.some((t) => activeWeathers.includes(t))) return false;
-  }
-  const activeCustom = activity.active_custom_filter_ids || [];
-  if (activeCustom.length) {
-    const tags = item.custom_filter_ids || [];
-    if (tags.length && !tags.some((t) => activeCustom.includes(t))) return false;
-  }
-  return true;
-}
+function renderCustomFilterBar() {
+  const host = $('#custom-filter-pills');
+  const hint = $('#custom-filter-hint');
+  const wrap = $('#custom-filter');
+  host.innerHTML = '';
 
-function renderFilterBar(act) {
-  const bar = $('filter-bar');
-  if (!act) { bar.hidden = true; return; }
-  bar.hidden = false;
+  const activity = activeActivity();
+  if (!activity) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
 
-  const weatherWrap = $('weather-filter-chips');
-  weatherWrap.innerHTML = '';
-  const activeWeathers = new Set(act.active_weathers || []);
-  for (const w of WEATHERS) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip chip-weather' + (activeWeathers.has(w.id) ? ' on' : '');
-    chip.title = w.label;
-    chip.textContent = `${w.emoji} ${w.label}`;
-    chip.addEventListener('click', () => toggleActivityWeather(w.id));
-    weatherWrap.appendChild(chip);
+  const filters = customFiltersFor(activity.id);
+  const active = new Set(activity.active_custom_filter_ids || []);
+  for (const f of filters) {
+    const on = active.has(f.id);
+    const pill = h('button', {
+      class: 'custom-filter-pill' + (on ? ' active' : ''),
+      type: 'button',
+      title: 'Click to toggle · double-click to rename / delete',
+      'aria-pressed': on ? 'true' : 'false',
+      onclick: () => toggleActivityCustomFilter(activity.id, f.id),
+      ondblclick: (e) => { e.preventDefault(); editCustomFilterPrompt(activity.id, f.id); },
+    }, f.label);
+    host.appendChild(pill);
   }
+  const addBtn = h('button', {
+    class: 'custom-filter-pill custom-filter-pill-add',
+    type: 'button',
+    title: 'Add a sub-filter',
+    onclick: () => addCustomFilterPrompt(activity.id),
+  }, '+');
+  host.appendChild(addBtn);
 
-  const customWrap = $('custom-filter-chips');
-  customWrap.innerHTML = '';
-  const filters = customFiltersByActivity[act.id] || [];
-  const activeCustom = new Set(act.active_custom_filter_ids || []);
   if (!filters.length) {
-    const hint = document.createElement('span');
-    hint.className = 'muted';
-    hint.textContent = 'None yet';
-    customWrap.appendChild(hint);
+    hint.textContent = 'Click + to add sub-filters (e.g. Trad, Sport, Bouldering)';
+  } else if (active.size) {
+    hint.textContent = 'Showing equipment + items tagged for selected filters';
+  } else {
+    hint.textContent = 'All items';
   }
-  for (const f of filters) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'chip chip-custom' + (activeCustom.has(f.id) ? ' on' : '');
-    chip.textContent = f.label;
-    if (customFilterEditMode) {
-      const editIcon = document.createElement('span');
-      editIcon.className = 'chip-edit';
-      editIcon.textContent = '✎';
-      editIcon.title = 'Rename';
-      editIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        renameCustomFilter(f);
-      });
-      const delIcon = document.createElement('span');
-      delIcon.className = 'chip-del';
-      delIcon.textContent = '×';
-      delIcon.title = 'Delete';
-      delIcon.addEventListener('click', (e) => {
-        e.stopPropagation();
-        deleteCustomFilter(f);
-      });
-      chip.append(' ', editIcon, delIcon);
-    }
-    chip.addEventListener('click', () => {
-      if (customFilterEditMode) return;
-      toggleActivityCustomFilter(f.id);
-    });
-    customWrap.appendChild(chip);
-  }
-
-  const editBtn = $('edit-custom-filters');
-  editBtn.textContent = customFilterEditMode ? 'Done' : 'Edit';
-  editBtn.classList.toggle('btn-primary', customFilterEditMode);
-  editBtn.classList.toggle('btn-ghost', !customFilterEditMode);
-  editBtn.hidden = filters.length === 0;
 }
 
-function renderItemTagRow(it, act) {
-  const row = document.createElement('div');
-  row.className = 'item-tags';
+function renderWeatherFilter() {
+  const host = $('#weather-toggles');
+  const hint = $('#weather-filter-hint');
+  const wrap = $('#weather-filter');
+  host.innerHTML = '';
 
-  const itemWeathers = new Set(it.weather_tags || []);
-  for (const w of WEATHERS) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'tag tag-weather' + (itemWeathers.has(w.id) ? ' on' : '');
-    chip.title = `Tag as ${w.label.toLowerCase()}`;
-    chip.textContent = w.emoji;
-    chip.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleItemWeather(it.id, w.id);
-    });
-    row.appendChild(chip);
+  const activity = activeActivity();
+  if (!activity) { wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+
+  const active = new Set(activity.active_weathers || []);
+  for (const w of WEATHER_TYPES) {
+    const on = active.has(w.id);
+    const btn = h('button', {
+      class: 'weather-toggle' + (on ? ' active' : ''),
+      type: 'button',
+      title: w.label,
+      'aria-pressed': on ? 'true' : 'false',
+      onclick: () => toggleActivityWeather(activity.id, w.id),
+    },
+      h('span', { class: 'weather-emoji' }, w.emoji),
+      h('span', {}, w.label),
+    );
+    host.appendChild(btn);
+  }
+  hint.textContent = active.size ? 'Showing equipment + matching clothing' : 'All items';
+}
+
+function renderActivity() {
+  const list = $('#activity-list');
+  const empty = $('#activity-empty');
+  const totalEl = $('#activity-total');
+  const packedEl = $('#activity-packed');
+  const resetBtn = $('#reset-checklist-btn');
+  const editBtn = $('#edit-activity-btn');
+
+  list.innerHTML = '';
+  const activity = activeActivity();
+  if (!activity) {
+    empty.classList.add('hidden');
+    totalEl.textContent = 'Total: —';
+    packedEl.textContent = '';
+    resetBtn.disabled = true;
+    editBtn.disabled = true;
+    return;
+  }
+  const items = itemsFor(activity.id);
+  resetBtn.disabled = !items.length;
+  editBtn.disabled = false;
+
+  const activeWeather = new Set(activity.active_weathers || []);
+  const activeCustom = new Set(activity.active_custom_filter_ids || []);
+  const passWeather = (item) => {
+    if (!activeWeather.size) return true;
+    const tags = item.weather_tags || [];
+    if (!tags.length) return true;
+    return tags.some((t) => activeWeather.has(t));
+  };
+  const passCustom = (item) => {
+    if (!activeCustom.size) return true;
+    const tags = item.custom_filter_ids || [];
+    if (!tags.length) return true;
+    return tags.some((t) => activeCustom.has(t));
+  };
+
+  const visibleItems = [];
+  for (const item of items) {
+    const gear = gearList.find((g) => g.id === item.gear_id);
+    if (!gear) continue;
+    if (passWeather(item) && passCustom(item)) visibleItems.push({ item, gear });
   }
 
-  const filters = customFiltersByActivity[act.id] || [];
-  const itemCustom = new Set(it.custom_filter_ids || []);
-  if (filters.length) {
-    const sep = document.createElement('span');
-    sep.className = 'tag-sep';
-    row.appendChild(sep);
-  }
-  for (const f of filters) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'tag tag-custom' + (itemCustom.has(f.id) ? ' on' : '');
-    chip.textContent = f.label;
-    chip.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleItemCustomFilter(it.id, f.id);
-    });
-    row.appendChild(chip);
+  if (!items.length || !visibleItems.length) {
+    empty.classList.remove('hidden');
+  } else {
+    empty.classList.add('hidden');
+    for (const { item, gear } of visibleItems) {
+      list.appendChild(activityItemRow(activity, item, gear));
+    }
   }
 
+  let total = 0, packed = 0, packedCount = 0;
+  for (const { item, gear } of visibleItems) {
+    const qty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
+    const w = (gear.weight_grams || 0) * qty;
+    total += w;
+    if (item.packed) { packed += w; packedCount += 1; }
+  }
+  totalEl.textContent = `Total: ${formatWeight(total)}`;
+  packedEl.textContent = visibleItems.length
+    ? `${formatWeight(packed)} packed • ${packedCount}/${visibleItems.length} items`
+    : '';
+}
+
+function activityItemRow(activity, item, gear) {
+  const imgEl = gearImageEl(gear.image_url);
+
+  const weatherSet = new Set(item.weather_tags || []);
+  const weatherChips = h('div', {
+    class: 'weather-chips',
+    title: 'Tag this item by weather (leave blank for equipment)',
+    onclick: (e) => e.stopPropagation(),
+  },
+    ...WEATHER_TYPES.map((w) => h('button', {
+      class: 'weather-chip' + (weatherSet.has(w.id) ? ' active' : ''),
+      type: 'button',
+      title: w.label,
+      'aria-pressed': weatherSet.has(w.id) ? 'true' : 'false',
+      onclick: (e) => { e.stopPropagation(); toggleItemWeather(item.id, w.id); },
+    }, w.emoji)),
+  );
+
+  const filters = customFiltersFor(activity.id);
+  const customSet = new Set(item.custom_filter_ids || []);
+  const customChips = filters.length
+    ? h('div', {
+        class: 'custom-chips',
+        title: 'Tag this item by sub-filter (leave blank for equipment)',
+        onclick: (e) => e.stopPropagation(),
+      },
+        ...filters.map((f) => h('button', {
+          class: 'custom-chip' + (customSet.has(f.id) ? ' active' : ''),
+          type: 'button',
+          title: f.label,
+          'aria-pressed': customSet.has(f.id) ? 'true' : 'false',
+          onclick: (e) => { e.stopPropagation(); toggleItemCustomFilter(item.id, f.id); },
+        }, f.label)),
+      )
+    : null;
+
+  const ownedQty = Number.isFinite(gear.quantity) && gear.quantity >= 1 ? gear.quantity : 1;
+  const itemQty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
+  const showStepper = ownedQty > 1;
+  const totalWeight = (gear.weight_grams || 0) * itemQty;
+
+  const stepperEl = showStepper
+    ? h('div', {
+        class: 'item-qty',
+        title: `You own ${ownedQty}`,
+        onclick: (e) => e.stopPropagation(),
+      },
+        h('button', {
+          class: 'item-qty-btn',
+          type: 'button',
+          disabled: itemQty <= 1,
+          onclick: (e) => { e.stopPropagation(); setItemQuantity(item.id, itemQty - 1); },
+        }, '−'),
+        h('input', {
+          class: 'item-qty-input',
+          type: 'number',
+          min: 1,
+          step: 1,
+          value: String(itemQty),
+          onclick: (e) => e.stopPropagation(),
+          onchange: (e) => setItemQuantity(item.id, parseInt(e.target.value, 10)),
+        }),
+        h('button', {
+          class: 'item-qty-btn',
+          type: 'button',
+          onclick: (e) => { e.stopPropagation(); setItemQuantity(item.id, itemQty + 1); },
+        }, '+'),
+        h('span', { class: 'item-qty-owned muted' }, `/ ${ownedQty}`),
+      )
+    : null;
+
+  const weightLabel = gear.weight_grams == null
+    ? '—'
+    : (itemQty > 1
+        ? `${formatWeight(totalWeight)} (${itemQty}× ${formatWeight(gear.weight_grams)})`
+        : formatWeight(gear.weight_grams));
+
+  const row = h('div', {
+    class: 'activity-item' + (item.packed ? ' packed' : ''),
+    draggable: 'true',
+    dataset: { gearId: gear.id, itemId: item.id },
+    ondragstart: (e) => handleItemDragStart(e, activity.id, gear.id),
+    ondragend: handleDragEnd,
+    ondragover: handleItemDragOver,
+    ondragleave: handleItemDragLeave,
+    ondrop: (e) => handleItemDrop(e, activity.id, gear.id),
+  },
+    h('input', {
+      type: 'checkbox',
+      checked: item.packed,
+      onchange: () => togglePacked(item.id, !item.packed),
+      onclick: (e) => e.stopPropagation(),
+    }),
+    imgEl,
+    h('div', { class: 'activity-item-meta' },
+      h('div', { class: 'gear-name-row' }, gear.name || 'Unnamed'),
+      h('div', { class: 'gear-sub-row' },
+        [gear.brand, escapeHost(gear.url)].filter(Boolean).join(' • ')),
+      stepperEl,
+      customChips,
+      weatherChips,
+    ),
+    h('div', { class: 'item-weight' }, weightLabel),
+    h('button', {
+      class: 'item-remove',
+      title: 'Remove from this list',
+      onclick: (e) => { e.stopPropagation(); removeGearFromActivity(activity.id, gear.id); },
+    }, '×'),
+  );
   return row;
 }
 
-function renderActivityBody() {
-  const title = $('activity-title');
-  const ul = $('activity-items');
-  const footer = $('activity-footer');
-  ul.innerHTML = '';
-  wireDropTarget(ul, () => activeActivityId);
-  const act = activities.find((a) => a.id === activeActivityId);
-  renderFilterBar(act);
-  if (!act) {
-    title.textContent = 'No activity';
-    footer.textContent = '';
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'Create an activity with the “+ New” button above.';
-    ul.appendChild(li);
-    return;
-  }
-  title.textContent = `${act.emoji ? act.emoji + ' ' : ''}${act.name}`;
-
-  const allItems = itemsByActivity[act.id] || [];
-  const items = allItems.filter((it) => itemPassesFilters(it, act));
-  const hiddenCount = allItems.length - items.length;
-
-  if (!allItems.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'No items yet. Drag gear from the library into this list.';
-    ul.appendChild(li);
-  } else if (!items.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = 'All items are hidden by the current filters.';
-    ul.appendChild(li);
-  }
-
-  let totalGrams = 0;
-  let packedGrams = 0;
-  for (const it of items) {
-    const gear = gearList.find((g) => g.id === it.gear_id);
-    if (!gear) continue;
-    const qty = it.quantity || 1;
-    const w = (gear.weight_grams || 0) * qty;
-    totalGrams += w;
-    if (it.packed) packedGrams += w;
-
-    const li = document.createElement('li');
-    li.className = 'activity-item' + (it.packed ? ' packed' : '');
-
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !!it.packed;
-    cb.addEventListener('change', () => togglePacked(it.id, cb.checked));
-
-    const main = document.createElement('div');
-    main.className = 'gear-main';
-    const name = document.createElement('div');
-    name.className = 'item-name';
-    name.textContent = gear.name;
-    const meta = document.createElement('div');
-    meta.className = 'item-meta';
-    const metaBits = [];
-    if (gear.brand) metaBits.push(gear.brand);
-    if (gear.weight_grams != null) metaBits.push(formatWeight(gear.weight_grams));
-    meta.textContent = metaBits.join(' · ');
-    main.append(name, meta, renderItemTagRow(it, act));
-
-    const qtyWrap = document.createElement('label');
-    qtyWrap.className = 'item-qty';
-    const qtyInput = document.createElement('input');
-    qtyInput.type = 'number';
-    qtyInput.min = '0';
-    qtyInput.step = '1';
-    qtyInput.value = String(qty);
-    qtyInput.addEventListener('change', () => {
-      const n = Math.max(0, Math.round(Number(qtyInput.value) || 0));
-      updateItemQuantity(it.id, n);
-    });
-    qtyWrap.append(qtyInput, document.createTextNode('×'));
-
-    const remove = document.createElement('button');
-    remove.className = 'item-remove';
-    remove.title = 'Remove from list';
-    remove.textContent = '×';
-    remove.addEventListener('click', () => removeItem(it.id));
-
-    li.append(cb, main, qtyWrap, remove);
-    ul.appendChild(li);
-  }
-
-  const totalLine =
-    allItems.length === 0
-      ? ''
-      : `Total: ${formatWeight(totalGrams)} (${formatWeight(packedGrams)} packed)`;
-  footer.textContent = hiddenCount
-    ? `${totalLine}  ·  ${hiddenCount} hidden by filters`
-    : totalLine;
+// ------------------------------------------------------------------
+// Mutations — gear library
+// ------------------------------------------------------------------
+function handleInlineDeleteGear(id) {
+  const gear = gearList.find((g) => g.id === id);
+  if (!gear) return;
+  const usedIn = activities.filter((a) => itemsFor(a.id).some((i) => i.gear_id === id));
+  const msg = usedIn.length
+    ? `Delete "${gear.name}"? It will also be removed from: ${usedIn.map((a) => a.name).join(', ')}.`
+    : `Delete "${gear.name}"?`;
+  if (!confirm(msg)) return;
+  deleteGear(id);
 }
 
-function renderGearList() {
-  const ul = $('gear-list');
-  ul.innerHTML = '';
-  ul.classList.toggle('edit-mode', gearEditMode);
-  const q = gearSearch.trim().toLowerCase();
-  const filtered = q
-    ? gearList.filter(
-        (g) =>
-          (g.name || '').toLowerCase().includes(q) ||
-          (g.brand || '').toLowerCase().includes(q)
-      )
-    : gearList;
-  if (!filtered.length) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = gearList.length
-      ? 'No matches.'
-      : 'No gear yet. Click “+ Add gear” to add some.';
-    ul.appendChild(li);
-    return;
+async function deleteGear(id) {
+  const { error } = await supabase.from('gear').delete().eq('id', id);
+  if (error) { toast(error.message, 'error'); return; }
+  gearList = gearList.filter((g) => g.id !== id);
+  for (const k of Object.keys(itemsByActivity)) {
+    itemsByActivity[k] = itemsByActivity[k].filter((i) => i.gear_id !== id);
   }
-  for (const g of filtered) {
-    const li = document.createElement('li');
-    li.className = 'gear-item' + (editingGearId === g.id ? ' editing' : '');
-
-    if (!gearEditMode) {
-      li.draggable = true;
-      li.addEventListener('dragstart', (e) => {
-        e.dataTransfer.effectAllowed = 'copy';
-        e.dataTransfer.setData('text/gear-id', g.id);
-        li.classList.add('dragging');
-      });
-      li.addEventListener('dragend', () => li.classList.remove('dragging'));
-    }
-
-    const thumb = g.image_url
-      ? Object.assign(document.createElement('img'), {
-          src: g.image_url,
-          alt: g.name,
-          className: 'gear-thumb',
-          loading: 'lazy',
-        })
-      : Object.assign(document.createElement('div'), {
-          className: 'gear-thumb placeholder',
-          textContent: '—',
-        });
-
-    const main = document.createElement('div');
-    main.className = 'gear-main';
-    const name = document.createElement('div');
-    name.className = 'gear-name';
-    name.textContent = g.name;
-    const meta = document.createElement('div');
-    meta.className = 'gear-meta';
-    const bits = [];
-    if (g.brand) bits.push(g.brand);
-    if (g.weight_grams != null) bits.push(formatWeight(g.weight_grams));
-    if (g.quantity && g.quantity !== 1) bits.push(`own ${g.quantity}`);
-    meta.textContent = bits.join(' · ') || '—';
-    main.append(name, meta);
-    if (g.url) {
-      const a = document.createElement('a');
-      a.href = g.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      a.textContent = 'link';
-      a.className = 'muted';
-      a.style.fontSize = '0.8rem';
-      main.appendChild(a);
-    }
-
-    li.append(thumb, main);
-
-    if (gearEditMode) {
-      const actions = document.createElement('div');
-      actions.className = 'gear-actions';
-      const editBtn = document.createElement('button');
-      editBtn.className = 'btn btn-primary';
-      editBtn.textContent = editingGearId === g.id ? 'Editing…' : 'Edit';
-      editBtn.disabled = editingGearId === g.id;
-      editBtn.addEventListener('click', () => beginEditGear(g));
-      const delBtn = document.createElement('button');
-      delBtn.className = 'btn btn-ghost danger';
-      delBtn.textContent = 'Delete';
-      delBtn.addEventListener('click', () => deleteGear(g.id, g.name));
-      actions.append(editBtn, delBtn);
-      li.append(actions);
-    }
-
-    ul.appendChild(li);
-  }
+  render();
 }
 
 // ------------------------------------------------------------------
-// Mutations
+// Mutations — activity items
 // ------------------------------------------------------------------
 async function togglePacked(itemId, packed) {
   const { error } = await supabase.from('activity_items').update({ packed }).eq('id', itemId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  const items = itemsByActivity[activeActivityId] || [];
-  const item = items.find((i) => i.id === itemId);
-  if (item) item.packed = packed;
+  if (error) { toast(error.message, 'error'); return; }
+  for (const arr of Object.values(itemsByActivity)) {
+    const it = arr.find((i) => i.id === itemId);
+    if (it) it.packed = packed;
+  }
   render();
 }
 
-async function updateItemQuantity(itemId, quantity) {
-  const { error } = await supabase
-    .from('activity_items')
-    .update({ quantity })
-    .eq('id', itemId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  const items = itemsByActivity[activeActivityId] || [];
-  const item = items.find((i) => i.id === itemId);
-  if (item) item.quantity = quantity;
+async function setItemQuantity(itemId, quantity) {
+  const q = Math.max(1, Math.floor(Number(quantity) || 1));
+  const { error } = await supabase.from('activity_items').update({ quantity: q }).eq('id', itemId);
+  if (error) { toast(error.message, 'error'); return; }
+  for (const arr of Object.values(itemsByActivity)) {
+    const it = arr.find((i) => i.id === itemId);
+    if (it) it.quantity = q;
+  }
   render();
 }
 
-async function removeItem(itemId) {
-  const { error } = await supabase.from('activity_items').delete().eq('id', itemId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  itemsByActivity[activeActivityId] = (itemsByActivity[activeActivityId] || []).filter(
-    (i) => i.id !== itemId
-  );
+async function removeGearFromActivity(activityId, gearId) {
+  const items = itemsFor(activityId);
+  const item = items.find((i) => i.gear_id === gearId);
+  if (!item) return;
+  const { error } = await supabase.from('activity_items').delete().eq('id', item.id);
+  if (error) { toast(error.message, 'error'); return; }
+  itemsByActivity[activityId] = items.filter((i) => i.id !== item.id);
   render();
 }
 
-async function addGearToActivity(gearId, activityId = activeActivityId) {
+async function addGearToActivity(activityId, gearId) {
   if (!activityId) return;
-  const existing = (itemsByActivity[activityId] || []).find((i) => i.gear_id === gearId);
+  const existing = itemsFor(activityId).find((i) => i.gear_id === gearId);
   if (existing) {
-    const { error } = await supabase
-      .from('activity_items')
-      .update({ quantity: (existing.quantity || 1) + 1 })
-      .eq('id', existing.id);
-    if (error) return setStatus(statusEl, error.message, 'error');
-    existing.quantity = (existing.quantity || 1) + 1;
+    const q = (existing.quantity || 1) + 1;
+    const { error } = await supabase.from('activity_items').update({ quantity: q }).eq('id', existing.id);
+    if (error) { toast(error.message, 'error'); return; }
+    existing.quantity = q;
     render();
     return;
   }
-  const position = (itemsByActivity[activityId] || []).length;
+  const position = itemsFor(activityId).length;
   const { data, error } = await supabase
     .from('activity_items')
     .insert({ activity_id: activityId, gear_id: gearId, position, quantity: 1 })
     .select()
     .single();
-  if (error) return setStatus(statusEl, error.message, 'error');
+  if (error) { toast(error.message, 'error'); return; }
   (itemsByActivity[activityId] ||= []).push(data);
   render();
+}
+
+async function reorderActivityItems(activityId, fromGearId, toGearId, position) {
+  const items = itemsFor(activityId).slice();
+  const fromIdx = items.findIndex((i) => i.gear_id === fromGearId);
+  const toIdx = items.findIndex((i) => i.gear_id === toGearId);
+  if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+  const [moved] = items.splice(fromIdx, 1);
+  let insertAt = items.findIndex((i) => i.gear_id === toGearId);
+  if (position === 'below') insertAt += 1;
+  items.splice(insertAt, 0, moved);
+  itemsByActivity[activityId] = items;
+  render();
+  // Persist new positions.
+  const updates = items.map((it, i) =>
+    supabase.from('activity_items').update({ position: i }).eq('id', it.id)
+  );
+  const results = await Promise.all(updates);
+  const failed = results.find((r) => r.error);
+  if (failed) toast(failed.error.message, 'error');
 }
 
 function toggleInArray(arr, value) {
   const list = Array.isArray(arr) ? [...arr] : [];
   const idx = list.indexOf(value);
-  if (idx === -1) list.push(value);
-  else list.splice(idx, 1);
+  if (idx === -1) list.push(value); else list.splice(idx, 1);
   return list;
 }
 
-async function toggleActivityWeather(weatherId) {
-  const act = activities.find((a) => a.id === activeActivityId);
+async function toggleActivityWeather(activityId, weatherId) {
+  const act = activities.find((a) => a.id === activityId);
   if (!act) return;
   const next = toggleInArray(act.active_weathers, weatherId);
-  const { error } = await supabase
-    .from('activities')
-    .update({ active_weathers: next })
-    .eq('id', act.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
+  const { error } = await supabase.from('activities').update({ active_weathers: next }).eq('id', activityId);
+  if (error) { toast(error.message, 'error'); return; }
   act.active_weathers = next;
   render();
 }
 
-async function toggleActivityCustomFilter(filterId) {
-  const act = activities.find((a) => a.id === activeActivityId);
+async function toggleItemWeather(itemId, weatherId) {
+  let item = null;
+  for (const arr of Object.values(itemsByActivity)) {
+    const it = arr.find((i) => i.id === itemId);
+    if (it) { item = it; break; }
+  }
+  if (!item) return;
+  const next = toggleInArray(item.weather_tags, weatherId);
+  const { error } = await supabase.from('activity_items').update({ weather_tags: next }).eq('id', itemId);
+  if (error) { toast(error.message, 'error'); return; }
+  item.weather_tags = next;
+  render();
+}
+
+async function toggleActivityCustomFilter(activityId, filterId) {
+  const act = activities.find((a) => a.id === activityId);
   if (!act) return;
   const next = toggleInArray(act.active_custom_filter_ids, filterId);
-  const { error } = await supabase
-    .from('activities')
-    .update({ active_custom_filter_ids: next })
-    .eq('id', act.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
+  const { error } = await supabase.from('activities').update({ active_custom_filter_ids: next }).eq('id', activityId);
+  if (error) { toast(error.message, 'error'); return; }
   act.active_custom_filter_ids = next;
   render();
 }
 
-async function toggleItemWeather(itemId, weatherId) {
-  const items = itemsByActivity[activeActivityId] || [];
-  const it = items.find((i) => i.id === itemId);
-  if (!it) return;
-  const next = toggleInArray(it.weather_tags, weatherId);
-  const { error } = await supabase
-    .from('activity_items')
-    .update({ weather_tags: next })
-    .eq('id', itemId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  it.weather_tags = next;
-  render();
-}
-
 async function toggleItemCustomFilter(itemId, filterId) {
-  const items = itemsByActivity[activeActivityId] || [];
-  const it = items.find((i) => i.id === itemId);
-  if (!it) return;
-  const next = toggleInArray(it.custom_filter_ids, filterId);
-  const { error } = await supabase
-    .from('activity_items')
-    .update({ custom_filter_ids: next })
-    .eq('id', itemId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  it.custom_filter_ids = next;
+  let item = null;
+  for (const arr of Object.values(itemsByActivity)) {
+    const it = arr.find((i) => i.id === itemId);
+    if (it) { item = it; break; }
+  }
+  if (!item) return;
+  const next = toggleInArray(item.custom_filter_ids, filterId);
+  const { error } = await supabase.from('activity_items').update({ custom_filter_ids: next }).eq('id', itemId);
+  if (error) { toast(error.message, 'error'); return; }
+  item.custom_filter_ids = next;
   render();
 }
 
-async function addCustomFilterPrompt() {
-  if (!activeActivityId) return;
-  const label = prompt('Filter name? (e.g. Trad climbing)');
+async function addCustomFilterPrompt(activityId) {
+  const label = prompt('Sub-filter label? (e.g. Trad, Sport, Multi-pitch)');
   if (!label || !label.trim()) return;
-  const existing = customFiltersByActivity[activeActivityId] || [];
-  const position = existing.length;
+  const position = customFiltersFor(activityId).length;
   const { data, error } = await supabase
     .from('custom_filters')
-    .insert({ activity_id: activeActivityId, label: label.trim(), position })
+    .insert({ activity_id: activityId, label: label.trim(), position })
     .select()
     .single();
-  if (error) return setStatus(statusEl, error.message, 'error');
-  (customFiltersByActivity[activeActivityId] ||= []).push(data);
+  if (error) { toast(error.message, 'error'); return; }
+  (customFiltersByActivity[activityId] ||= []).push(data);
   render();
 }
 
-async function renameCustomFilter(filter) {
-  const label = prompt('Rename filter:', filter.label);
-  if (!label || !label.trim() || label.trim() === filter.label) return;
-  const { error } = await supabase
-    .from('custom_filters')
-    .update({ label: label.trim() })
-    .eq('id', filter.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  filter.label = label.trim();
-  render();
-}
-
-async function deleteCustomFilter(filter) {
-  if (!confirm(`Delete filter "${filter.label}"?`)) return;
-  const { error } = await supabase.from('custom_filters').delete().eq('id', filter.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  const list = customFiltersByActivity[filter.activity_id] || [];
-  customFiltersByActivity[filter.activity_id] = list.filter((f) => f.id !== filter.id);
-  const act = activities.find((a) => a.id === filter.activity_id);
-  if (act && (act.active_custom_filter_ids || []).includes(filter.id)) {
-    const next = act.active_custom_filter_ids.filter((id) => id !== filter.id);
-    act.active_custom_filter_ids = next;
-    await supabase.from('activities').update({ active_custom_filter_ids: next }).eq('id', act.id);
-  }
-  for (const it of itemsByActivity[filter.activity_id] || []) {
-    if ((it.custom_filter_ids || []).includes(filter.id)) {
-      it.custom_filter_ids = it.custom_filter_ids.filter((id) => id !== filter.id);
+async function editCustomFilterPrompt(activityId, filterId) {
+  const f = customFiltersFor(activityId).find((x) => x.id === filterId);
+  if (!f) return;
+  const next = prompt(`Rename sub-filter "${f.label}" (empty to delete):`, f.label);
+  if (next === null) return;
+  const clean = next.trim();
+  if (!clean) {
+    if (!confirm(`Delete sub-filter "${f.label}"?`)) return;
+    const { error } = await supabase.from('custom_filters').delete().eq('id', filterId);
+    if (error) { toast(error.message, 'error'); return; }
+    customFiltersByActivity[activityId] = customFiltersFor(activityId).filter((x) => x.id !== filterId);
+    // Clean from activity.active_custom_filter_ids + item.custom_filter_ids
+    const act = activities.find((a) => a.id === activityId);
+    if (act && (act.active_custom_filter_ids || []).includes(filterId)) {
+      act.active_custom_filter_ids = act.active_custom_filter_ids.filter((id) => id !== filterId);
     }
+    for (const it of itemsFor(activityId)) {
+      if ((it.custom_filter_ids || []).includes(filterId)) {
+        it.custom_filter_ids = it.custom_filter_ids.filter((id) => id !== filterId);
+      }
+    }
+    render();
+    return;
   }
+  const { error } = await supabase.from('custom_filters').update({ label: clean }).eq('id', filterId);
+  if (error) { toast(error.message, 'error'); return; }
+  f.label = clean;
   render();
 }
 
-function wireDropTarget(el, getActivityId) {
-  el.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer.types.includes('text/gear-id')) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
-    el.classList.add('drop-hover');
-  });
-  el.addEventListener('dragleave', () => el.classList.remove('drop-hover'));
-  el.addEventListener('drop', (e) => {
-    const gearId = e.dataTransfer.getData('text/gear-id');
-    el.classList.remove('drop-hover');
-    if (!gearId) return;
-    e.preventDefault();
-    addGearToActivity(gearId, getActivityId());
-  });
-}
-
-async function deleteGear(gearId, name) {
-  if (!confirm(`Delete "${name}"? This also removes it from every list.`)) return;
-  const { error } = await supabase.from('gear').delete().eq('id', gearId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  gearList = gearList.filter((g) => g.id !== gearId);
-  for (const k of Object.keys(itemsByActivity)) {
-    itemsByActivity[k] = itemsByActivity[k].filter((i) => i.gear_id !== gearId);
-  }
-  render();
-}
-
-async function addActivityPrompt() {
-  const name = prompt('Activity name? (e.g. Climbing)');
-  if (!name) return;
-  const emoji = prompt('Emoji for the tab? (optional)') || null;
-  const position = activities.length;
-  const { data, error } = await supabase
-    .from('activities')
-    .insert({ name, emoji, position })
-    .select()
-    .single();
-  if (error) return setStatus(statusEl, error.message, 'error');
-  activities.push(data);
-  activeActivityId = data.id;
-  render();
-}
-
-$('rename-activity').addEventListener('click', async () => {
-  const act = activities.find((a) => a.id === activeActivityId);
-  if (!act) return;
-  const name = prompt('New name?', act.name);
-  if (!name || name === act.name) return;
-  const { error } = await supabase.from('activities').update({ name }).eq('id', act.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  act.name = name;
-  render();
-});
-
-$('delete-activity').addEventListener('click', async () => {
-  const act = activities.find((a) => a.id === activeActivityId);
-  if (!act) return;
-  if (!confirm(`Delete "${act.name}" and all its items?`)) return;
-  const { error } = await supabase.from('activities').delete().eq('id', act.id);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  activities = activities.filter((a) => a.id !== act.id);
-  delete itemsByActivity[act.id];
-  activeActivityId = activities[0]?.id || null;
-  render();
-});
-
-$('add-custom-filter').addEventListener('click', addCustomFilterPrompt);
-
-$('edit-custom-filters').addEventListener('click', () => {
-  customFilterEditMode = !customFilterEditMode;
-  render();
-});
-
-$('reset-checklist').addEventListener('click', async () => {
-  if (!activeActivityId) return;
+async function resetChecklist(activityId) {
   const { error } = await supabase
     .from('activity_items')
     .update({ packed: false })
-    .eq('activity_id', activeActivityId);
-  if (error) return setStatus(statusEl, error.message, 'error');
-  for (const i of itemsByActivity[activeActivityId] || []) i.packed = false;
+    .eq('activity_id', activityId);
+  if (error) { toast(error.message, 'error'); return; }
+  for (const it of itemsFor(activityId)) it.packed = false;
   render();
-});
+  toast('Checklist reset.', 'success');
+}
 
 // ------------------------------------------------------------------
-// Add / edit gear modal + extraction
+// Drag & drop
 // ------------------------------------------------------------------
-const addGearToggle = $('add-gear-toggle');
-const editGearToggle = $('edit-gear-toggle');
-const gearModal = $('gear-modal');
-const gearModalTitle = $('gear-modal-title');
-const gearModalStatus = $('gear-modal-status');
-const addGearForm = $('add-gear-form');
-const addGearSubmit = addGearForm.querySelector('button[type="submit"]');
-const gearDropzone = $('gear-dropzone');
-const gearUrlInput = $('gear-url-input');
-const gearFileInput = $('gear-file-input');
-const gearPreviewImg = $('gear-preview-img');
-
-const DZ_IDLE = gearDropzone.querySelector('.dropzone-idle');
-const DZ_PREVIEW = gearDropzone.querySelector('.dropzone-preview');
-const DZ_LOADING = gearDropzone.querySelector('.dropzone-loading');
-
-function setDropzoneState(which) {
-  DZ_IDLE.hidden = which !== 'idle';
-  DZ_PREVIEW.hidden = which !== 'preview';
-  DZ_LOADING.hidden = which !== 'loading';
+function handleGearDragStart(e, gearId) {
+  dragState = { kind: 'gear', gearId };
+  e.dataTransfer.effectAllowed = 'copyMove';
+  e.dataTransfer.setData('text/plain', 'gear:' + gearId);
+  e.currentTarget.classList.add('dragging');
 }
-
-function resetGearForm() {
-  addGearForm.reset();
-  $('gear-quantity').value = '1';
-  editingGearId = null;
-  addGearSubmit.textContent = 'Save gear';
-  gearModalTitle.textContent = 'Add gear';
-  gearUrlInput.value = '';
-  gearPreviewImg.removeAttribute('src');
-  setDropzoneState('idle');
-  setStatus(gearModalStatus, '');
+function handleItemDragStart(e, activityId, gearId) {
+  dragState = { kind: 'item', activityId, gearId };
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', 'item:' + activityId + ':' + gearId);
+  e.currentTarget.classList.add('dragging');
+  $('#remove-dropzone').classList.remove('hidden');
 }
-
-function openGearModal() {
-  gearModal.hidden = false;
-  document.body.style.overflow = 'hidden';
-  requestAnimationFrame(() => gearUrlInput.focus());
+function handleDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  dragState = null;
+  $('#remove-dropzone').classList.add('hidden');
+  $$('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+  $$('.drop-above, .drop-below').forEach((el) => el.classList.remove('drop-above', 'drop-below'));
 }
-
-function closeGearModal() {
-  gearModal.hidden = true;
-  document.body.style.overflow = '';
-  resetGearForm();
-  renderGearList();
-}
-
-function openAddGearForm() {
-  resetGearForm();
-  openGearModal();
-}
-
-function beginEditGear(g) {
-  resetGearForm();
-  editingGearId = g.id;
-  gearModalTitle.textContent = 'Edit gear';
-  $('gear-name').value = g.name || '';
-  $('gear-weight').value =
-    g.weight_grams == null ? '' : String(gramsToUnit(g.weight_grams, displayUnit));
-  $('gear-quantity').value = String(g.quantity ?? 1);
-  $('gear-brand').value = g.brand || '';
-  $('gear-url').value = g.url || '';
-  $('gear-image').value = g.image_url || '';
-  $('gear-notes').value = g.notes || '';
-  addGearSubmit.textContent = 'Save changes';
-  openGearModal();
-  renderGearList();
-}
-
-addGearToggle.addEventListener('click', openAddGearForm);
-
-editGearToggle.addEventListener('click', () => {
-  gearEditMode = !gearEditMode;
-  editGearToggle.textContent = gearEditMode ? 'Done' : 'Edit';
-  editGearToggle.classList.toggle('btn-primary', gearEditMode);
-  editGearToggle.classList.toggle('btn-ghost', !gearEditMode);
-  render();
-});
-
-$('gear-cancel').addEventListener('click', closeGearModal);
-$('gear-modal-close').addEventListener('click', closeGearModal);
-gearModal.addEventListener('click', (e) => { if (e.target === gearModal) closeGearModal(); });
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !gearModal.hidden) closeGearModal();
-});
-
-addGearForm.addEventListener('submit', async (e) => {
+function handleTabDragOver(e) {
+  if (!dragState || dragState.kind !== 'gear') return;
   e.preventDefault();
-  const name = $('gear-name').value.trim();
-  if (!name) return;
-  const weightRaw = $('gear-weight').value;
-  const qty = Math.max(0, Math.round(Number($('gear-quantity').value) || 1));
-  const payload = {
+  e.currentTarget.classList.add('drop-target');
+}
+function handleTabDragLeave(e) { e.currentTarget.classList.remove('drop-target'); }
+function handleTabDrop(e, activityId) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drop-target');
+  if (dragState?.kind === 'gear') {
+    addGearToActivity(activityId, dragState.gearId);
+    activeActivityId = activityId;
+    render();
+  }
+}
+function handleBodyDragOver(e) {
+  if (!dragState || dragState.kind !== 'gear') return;
+  e.preventDefault();
+  e.currentTarget.classList.add('drop-target');
+}
+function handleBodyDragLeave(e) {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('drop-target');
+}
+function handleBodyDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drop-target');
+  if (dragState?.kind === 'gear' && activeActivityId) {
+    addGearToActivity(activeActivityId, dragState.gearId);
+  }
+}
+function handleItemDragOver(e) {
+  if (!dragState) return;
+  e.preventDefault();
+  const row = e.currentTarget;
+  if (dragState.kind === 'item' && dragState.gearId === row.dataset.gearId) return;
+  const rect = row.getBoundingClientRect();
+  const above = (e.clientY - rect.top) < rect.height / 2;
+  row.classList.toggle('drop-above', above);
+  row.classList.toggle('drop-below', !above);
+}
+function handleItemDragLeave(e) { e.currentTarget.classList.remove('drop-above', 'drop-below'); }
+function handleItemDrop(e, activityId, targetGearId) {
+  e.preventDefault();
+  const row = e.currentTarget;
+  const above = row.classList.contains('drop-above');
+  row.classList.remove('drop-above', 'drop-below');
+  if (!dragState) return;
+  if (dragState.kind === 'item' && dragState.activityId === activityId) {
+    reorderActivityItems(activityId, dragState.gearId, targetGearId, above ? 'above' : 'below');
+  } else if (dragState.kind === 'gear') {
+    addGearToActivity(activityId, dragState.gearId);
+  }
+  e.stopPropagation();
+}
+function handleRemoveDropzone() {
+  if (dragState?.kind === 'item') {
+    removeGearFromActivity(dragState.activityId, dragState.gearId);
+  }
+}
+
+// ------------------------------------------------------------------
+// Modals
+// ------------------------------------------------------------------
+function showModal(id) { $('#' + id).classList.remove('hidden'); }
+function hideModal(id) { $('#' + id).classList.add('hidden'); }
+
+// ------------------------------------------------------------------
+// Gear modal (add / edit)
+// ------------------------------------------------------------------
+function resetGearForm() {
+  editingGearId = null;
+  $('#gear-modal-title').textContent = 'Add gear';
+  $('#gear-name').value = '';
+  $('#gear-brand').value = '';
+  $('#gear-weight').value = '';
+  $('#gear-quantity').value = '1';
+  $('#gear-url').value = '';
+  $('#gear-image').value = '';
+  $('#gear-notes').value = '';
+  $('#gear-delete-btn').classList.add('hidden');
+  $('#fetch-status').textContent = '';
+  resetScreenshotUI();
+  updateGearPreview();
+}
+
+function setGearForm(gear) {
+  $('#gear-name').value = gear.name || '';
+  $('#gear-brand').value = gear.brand || '';
+  const w = gear.weight_grams == null ? '' : gramsToUnit(gear.weight_grams, displayUnit);
+  $('#gear-weight').value = w === '' ? '' : (displayUnit === 'g' ? String(Math.round(w)) : w.toFixed(2));
+  $('#gear-quantity').value = String(gear.quantity ?? 1);
+  $('#gear-url').value = gear.url || '';
+  $('#gear-image').value = gear.image_url || '';
+  $('#gear-notes').value = gear.notes || '';
+  updateGearPreview();
+}
+
+function readGearForm() {
+  const name = $('#gear-name').value.trim();
+  const brand = $('#gear-brand').value.trim() || null;
+  const weightRaw = $('#gear-weight').value;
+  const qty = Math.max(1, Math.floor(Number($('#gear-quantity').value) || 1));
+  const weight_grams = weightRaw === '' ? null : unitToGrams(weightRaw, displayUnit);
+  return {
     name,
-    brand: $('gear-brand').value.trim() || null,
-    weight_grams: weightRaw === '' ? null : unitToGrams(weightRaw, displayUnit),
-    url: $('gear-url').value.trim() || null,
-    image_url: $('gear-image').value.trim() || null,
-    notes: $('gear-notes').value.trim() || null,
+    brand,
+    weight_grams,
+    url: $('#gear-url').value.trim() || null,
+    image_url: $('#gear-image').value.trim() || null,
+    notes: $('#gear-notes').value.trim() || null,
     quantity: qty,
   };
+}
+
+function updateGearPreview() {
+  const img = $('#gear-preview-img');
+  const meta = $('#gear-preview-meta');
+  const removeBtn = $('#gear-preview-img-remove');
+  const url = $('#gear-image').value.trim();
+  if (url) {
+    img.src = url;
+    img.style.display = '';
+    removeBtn.classList.remove('hidden');
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    removeBtn.classList.add('hidden');
+  }
+  const name = $('#gear-name').value.trim();
+  const brand = $('#gear-brand').value.trim();
+  const weight = $('#gear-weight').value.trim();
+  const parts = [name || '(no name)', brand, weight ? `${weight} ${displayUnit}` : null].filter(Boolean);
+  meta.textContent = parts.join(' · ');
+}
+
+function openAddGear() {
+  resetGearForm();
+  showModal('gear-modal');
+  requestAnimationFrame(() => $('#gear-url').focus());
+}
+
+function openEditGear(id) {
+  const gear = gearList.find((g) => g.id === id);
+  if (!gear) return;
+  resetGearForm();
+  editingGearId = id;
+  $('#gear-modal-title').textContent = 'Edit gear';
+  $('#gear-delete-btn').classList.remove('hidden');
+  setGearForm(gear);
+  showModal('gear-modal');
+}
+
+async function handleSaveGear() {
+  const payload = readGearForm();
+  if (!payload.name) { $('#fetch-status').textContent = 'Name is required.'; return; }
   if (editingGearId) {
-    const id = editingGearId;
-    const { data, error } = await supabase
-      .from('gear')
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) return setStatus(gearModalStatus, error.message, 'error');
-    const idx = gearList.findIndex((g) => g.id === id);
+    const { data, error } = await supabase.from('gear').update(payload).eq('id', editingGearId).select().single();
+    if (error) { toast(error.message, 'error'); return; }
+    const idx = gearList.findIndex((g) => g.id === editingGearId);
     if (idx >= 0) gearList[idx] = data;
-    closeGearModal();
+    hideModal('gear-modal');
     render();
     return;
   }
   const { data, error } = await supabase.from('gear').insert(payload).select().single();
-  if (error) return setStatus(gearModalStatus, error.message, 'error');
+  if (error) { toast(error.message, 'error'); return; }
   gearList.unshift(data);
-  closeGearModal();
+  hideModal('gear-modal');
   render();
-});
+}
 
-$('gear-search').addEventListener('input', (e) => {
-  gearSearch = e.target.value;
-  renderGearList();
-});
+async function handleDeleteGear() {
+  if (!editingGearId) return;
+  const gear = gearList.find((g) => g.id === editingGearId);
+  if (!gear) return;
+  const usedIn = activities.filter((a) => itemsFor(a.id).some((i) => i.gear_id === editingGearId));
+  const msg = usedIn.length
+    ? `Delete "${gear.name}"? It will also be removed from: ${usedIn.map((a) => a.name).join(', ')}.`
+    : `Delete "${gear.name}"?`;
+  if (!confirm(msg)) return;
+  await deleteGear(editingGearId);
+  hideModal('gear-modal');
+}
 
 // ------------------------------------------------------------------
-// Extraction: URL or screenshot → Supabase Edge Function → form fields
+// Gear extraction pipeline (URL + screenshot) — server-side Edge Function
 // ------------------------------------------------------------------
 function applyExtracted(data) {
   if (!data) return;
   const setIfEmpty = (id, val) => {
     if (val == null || val === '') return;
-    const el = $(id);
+    const el = $('#' + id);
     if (!el.value) el.value = val;
   };
   setIfEmpty('gear-name', data.name);
@@ -929,10 +1173,11 @@ function applyExtracted(data) {
   setIfEmpty('gear-url', data.url);
   setIfEmpty('gear-image', data.imageUrl);
   setIfEmpty('gear-notes', data.notes);
-  if (data.weightGrams != null && !$('gear-weight').value) {
+  if (data.weightGrams != null && !$('#gear-weight').value) {
     const v = gramsToUnit(data.weightGrams, displayUnit);
-    $('gear-weight').value = displayUnit === 'g' ? String(Math.round(v)) : v.toFixed(2);
+    $('#gear-weight').value = displayUnit === 'g' ? String(Math.round(v)) : v.toFixed(2);
   }
+  updateGearPreview();
 }
 
 async function callExtractGear(payload) {
@@ -954,17 +1199,14 @@ async function callExtractGear(payload) {
 }
 
 async function extractFromUrl(url) {
-  setStatus(gearModalStatus, 'Fetching product page…');
-  setDropzoneState('loading');
-  $('gear-loading-msg').textContent = 'Reading the product page…';
+  const status = $('#fetch-status');
+  status.textContent = 'Fetching product page…';
   try {
     const data = await callExtractGear({ url });
     applyExtracted(data);
-    setStatus(gearModalStatus, 'Filled in what we could find — review and save.', 'ok');
+    status.textContent = 'Filled in what we could find — review and save.';
   } catch (err) {
-    setStatus(gearModalStatus, err.message, 'error');
-  } finally {
-    setDropzoneState(gearPreviewImg.getAttribute('src') ? 'preview' : 'idle');
+    status.textContent = err.message;
   }
 }
 
@@ -983,144 +1225,296 @@ async function fileToResizedDataUrl(file, maxDim = 1600) {
   });
   const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
   const w = Math.round(img.width * scale);
-  const h = Math.round(img.height * scale);
+  const H = Math.round(img.height * scale);
   const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  canvas.width = w; canvas.height = H;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, H);
   const mediaType = 'image/jpeg';
   const resized = canvas.toDataURL(mediaType, 0.85);
   const base64 = resized.split(',')[1];
   return { base64, mediaType, dataUrl: resized };
 }
 
+function resetScreenshotUI() {
+  const dz = $('#screenshot-dropzone');
+  dz.querySelector('.dropzone-idle').classList.remove('hidden');
+  dz.querySelector('.dropzone-preview').classList.add('hidden');
+  dz.querySelector('.dropzone-loading').classList.add('hidden');
+  $('#screenshot-preview').removeAttribute('src');
+}
+
+function setScreenshotState(which) {
+  const dz = $('#screenshot-dropzone');
+  dz.querySelector('.dropzone-idle').classList.toggle('hidden', which !== 'idle');
+  dz.querySelector('.dropzone-preview').classList.toggle('hidden', which !== 'preview');
+  dz.querySelector('.dropzone-loading').classList.toggle('hidden', which !== 'loading');
+}
+
 async function handleScreenshotFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
-  if (gearModal.hidden) openAddGearForm();
-  setStatus(gearModalStatus, '');
+  if ($('#gear-modal').classList.contains('hidden')) openAddGear();
   try {
     const { base64, mediaType, dataUrl } = await fileToResizedDataUrl(file);
-    gearPreviewImg.src = dataUrl;
-    setDropzoneState('loading');
-    $('gear-loading-msg').textContent = 'Reading the screenshot…';
+    $('#screenshot-preview').src = dataUrl;
+    setScreenshotState('loading');
+    $('#screenshot-status').textContent = 'Reading the screenshot…';
     const data = await callExtractGear({ image: { base64, mediaType } });
     applyExtracted(data);
-    setDropzoneState('preview');
-    setStatus(gearModalStatus, 'Filled in what we could see — review and save.', 'ok');
+    setScreenshotState('preview');
+    $('#fetch-status').textContent = 'Filled in what we could see — review and save.';
   } catch (err) {
-    setDropzoneState(gearPreviewImg.getAttribute('src') ? 'preview' : 'idle');
-    setStatus(gearModalStatus, err.message, 'error');
+    setScreenshotState($('#screenshot-preview').getAttribute('src') ? 'preview' : 'idle');
+    $('#fetch-status').textContent = err.message;
   }
 }
 
-// URL fetch button + Enter key
-$('gear-url-fetch').addEventListener('click', () => {
-  const url = gearUrlInput.value.trim();
-  if (!url) return;
-  extractFromUrl(url);
-});
-gearUrlInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    $('gear-url-fetch').click();
-  }
-});
-
-// File picker
-gearFileInput.addEventListener('change', (e) => {
-  const file = e.target.files?.[0];
-  if (file) handleScreenshotFile(file);
-  e.target.value = '';
-});
-
-// Clear preview → back to idle (so user can pick a different image)
-$('gear-preview-clear').addEventListener('click', () => {
-  gearPreviewImg.removeAttribute('src');
-  setDropzoneState('idle');
-});
-
-// Paste an image from clipboard into the dropzone/modal
-gearDropzone.addEventListener('paste', (e) => {
-  const items = e.clipboardData?.items || [];
-  for (const it of items) {
-    if (it.kind === 'file' && it.type.startsWith('image/')) {
-      e.preventDefault();
-      handleScreenshotFile(it.getAsFile());
-      return;
-    }
-  }
-});
-
-// Drop directly on the modal's inner dropzone
-gearDropzone.addEventListener('dragover', (e) => {
-  if (!e.dataTransfer?.types.includes('Files')) return;
-  e.preventDefault();
-  gearDropzone.classList.add('drag-over');
-});
-gearDropzone.addEventListener('dragleave', () => gearDropzone.classList.remove('drag-over'));
-gearDropzone.addEventListener('drop', (e) => {
-  if (!e.dataTransfer?.types.includes('Files')) return;
-  e.preventDefault();
-  gearDropzone.classList.remove('drag-over');
-  const file = e.dataTransfer.files?.[0];
-  if (file) handleScreenshotFile(file);
-});
-
-// Drop-anywhere: any file dragged onto the window opens the modal + extracts
-const globalSplash = $('global-drop-splash');
-let dragDepth = 0;
-function isFileDrag(e) {
-  return Array.from(e.dataTransfer?.types || []).includes('Files');
+// ------------------------------------------------------------------
+// Activity modal
+// ------------------------------------------------------------------
+function openNewActivity() {
+  editingActivityId = null;
+  $('#activity-modal-title').textContent = 'New activity';
+  $('#activity-name').value = '';
+  $('#activity-emoji').value = '';
+  $('#activity-delete-btn').classList.add('hidden');
+  showModal('activity-modal');
+  requestAnimationFrame(() => $('#activity-name').focus());
 }
-window.addEventListener('dragenter', (e) => {
-  if (!isFileDrag(e)) return;
-  dragDepth++;
-  // When the modal is open, its inner dropzone handles the UI — skip the splash.
-  if (gearModal.hidden) globalSplash.hidden = false;
-});
-window.addEventListener('dragover', (e) => {
-  if (!isFileDrag(e)) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'copy';
-});
-window.addEventListener('dragleave', (e) => {
-  if (!isFileDrag(e)) return;
-  dragDepth = Math.max(0, dragDepth - 1);
-  if (dragDepth === 0) globalSplash.hidden = true;
-});
-window.addEventListener('drop', (e) => {
-  if (!isFileDrag(e)) return;
-  e.preventDefault();
-  dragDepth = 0;
-  globalSplash.hidden = true;
-  const file = e.dataTransfer.files?.[0];
-  if (file && file.type.startsWith('image/')) handleScreenshotFile(file);
-});
 
-// ------------------------------------------------------------------
-// Unit toggle
-// ------------------------------------------------------------------
-const unitSelect = $('unit-select');
-unitSelect.value = displayUnit;
-unitSelect.addEventListener('change', () => {
-  displayUnit = unitSelect.value;
-  localStorage.setItem(LS_UNIT_KEY, displayUnit);
+function openEditActivity(id) {
+  const a = activities.find((x) => x.id === id);
+  if (!a) return;
+  editingActivityId = id;
+  $('#activity-modal-title').textContent = 'Edit activity';
+  $('#activity-name').value = a.name || '';
+  $('#activity-emoji').value = a.emoji || '';
+  $('#activity-delete-btn').classList.remove('hidden');
+  showModal('activity-modal');
+}
+
+async function handleSaveActivity() {
+  const name = $('#activity-name').value.trim();
+  const emoji = $('#activity-emoji').value.trim() || null;
+  if (!name) return;
+  if (editingActivityId) {
+    const { error } = await supabase.from('activities').update({ name, emoji }).eq('id', editingActivityId);
+    if (error) { toast(error.message, 'error'); return; }
+    const a = activities.find((x) => x.id === editingActivityId);
+    if (a) { a.name = name; a.emoji = emoji; }
+    hideModal('activity-modal');
+    render();
+    return;
+  }
+  const position = activities.length;
+  const { data, error } = await supabase
+    .from('activities')
+    .insert({ name, emoji, position })
+    .select()
+    .single();
+  if (error) { toast(error.message, 'error'); return; }
+  activities.push(data);
+  activeActivityId = data.id;
+  hideModal('activity-modal');
   render();
-});
+}
+
+async function handleDeleteActivity() {
+  if (!editingActivityId) return;
+  const a = activities.find((x) => x.id === editingActivityId);
+  if (!a) return;
+  if (!confirm(`Delete "${a.name}" and all its items?`)) return;
+  const { error } = await supabase.from('activities').delete().eq('id', editingActivityId);
+  if (error) { toast(error.message, 'error'); return; }
+  activities = activities.filter((x) => x.id !== editingActivityId);
+  delete itemsByActivity[editingActivityId];
+  delete customFiltersByActivity[editingActivityId];
+  if (activeActivityId === editingActivityId) {
+    activeActivityId = activities[0]?.id || null;
+  }
+  hideModal('activity-modal');
+  render();
+}
 
 // ------------------------------------------------------------------
-// Bootstrap + auth state wiring
+// Wiring
+// ------------------------------------------------------------------
+function wire() {
+  // Header
+  $('#add-gear-btn').addEventListener('click', openAddGear);
+  $('#unit-toggle').addEventListener('click', () => {
+    const i = UNIT_CYCLE.indexOf(displayUnit);
+    displayUnit = UNIT_CYCLE[(i + 1) % UNIT_CYCLE.length];
+    localStorage.setItem(LS_UNIT_KEY, displayUnit);
+    render();
+  });
+  $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
+
+  // Auth form
+  $('#auth-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#auth-email').value.trim();
+    if (!email) return;
+    $('#auth-submit').disabled = true;
+    setAuthStatus('Sending magic link…');
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin, shouldCreateUser: true },
+    });
+    $('#auth-submit').disabled = false;
+    if (error) { setAuthStatus(`Could not send: ${error.message}`, 'error'); return; }
+    setAuthStatus(`Check ${email} — click the link to sign in. You can close this tab.`, 'ok');
+  });
+
+  // Gear search
+  $('#gear-search').addEventListener('input', (e) => {
+    gearSearchQuery = e.target.value;
+    renderLibrary();
+  });
+
+  // Library edit mode
+  $('#library-edit-toggle').addEventListener('click', () => {
+    libraryEditMode = !libraryEditMode;
+    renderLibrary();
+  });
+
+  // Activity footer
+  $('#reset-checklist-btn').addEventListener('click', () => {
+    if (!activeActivityId) return;
+    const a = activeActivity();
+    if (!a) return;
+    const items = itemsFor(a.id);
+    if (!items.length) return;
+    if (!confirm(`Uncheck all ${items.length} items in "${a.name}"?`)) return;
+    resetChecklist(a.id);
+  });
+  $('#edit-activity-btn').addEventListener('click', () => {
+    if (activeActivityId) openEditActivity(activeActivityId);
+  });
+
+  // Gear modal
+  $('#fetch-details-btn').addEventListener('click', () => {
+    const url = $('#gear-url').value.trim();
+    if (!url) return;
+    extractFromUrl(url);
+  });
+  $('#gear-save-btn').addEventListener('click', handleSaveGear);
+  $('#gear-delete-btn').addEventListener('click', handleDeleteGear);
+  ['gear-name', 'gear-brand', 'gear-weight', 'gear-image'].forEach((id) => {
+    $('#' + id).addEventListener('input', updateGearPreview);
+  });
+  $('#gear-preview-img-remove').addEventListener('click', () => {
+    $('#gear-image').value = '';
+    updateGearPreview();
+  });
+
+  // Activity modal
+  $('#activity-save-btn').addEventListener('click', handleSaveActivity);
+  $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
+  // Enter-to-save in activity name field
+  $('#activity-name').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleSaveActivity(); }
+  });
+
+  // Modal close
+  $$('[data-close]').forEach((el) => {
+    el.addEventListener('click', () => hideModal(el.dataset.close));
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') $$('.modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+  });
+
+  // Screenshot dropzone inside gear modal
+  const dz = $('#screenshot-dropzone');
+  const fileInput = $('#screenshot-file-input');
+  dz.addEventListener('click', () => fileInput.click());
+  dz.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) handleScreenshotFile(f);
+  });
+  $('#screenshot-remove').addEventListener('click', () => {
+    resetScreenshotUI();
+  });
+  dz.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const it of items) {
+      if (it.kind === 'file' && it.type.startsWith('image/')) {
+        e.preventDefault();
+        handleScreenshotFile(it.getAsFile());
+        return;
+      }
+    }
+  });
+  dz.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dz.classList.add('drag-over');
+  });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    dz.classList.remove('drag-over');
+    const f = e.dataTransfer.files?.[0];
+    if (f) handleScreenshotFile(f);
+  });
+
+  // Activity body DnD
+  $('#activity-body').addEventListener('dragover', handleBodyDragOver);
+  $('#activity-body').addEventListener('dragleave', handleBodyDragLeave);
+  $('#activity-body').addEventListener('drop', handleBodyDrop);
+
+  // Remove dropzone
+  const rz = $('#remove-dropzone');
+  rz.addEventListener('dragover', (e) => { e.preventDefault(); rz.classList.add('active'); });
+  rz.addEventListener('dragleave', () => rz.classList.remove('active'));
+  rz.addEventListener('drop', (e) => { e.preventDefault(); rz.classList.remove('active'); handleRemoveDropzone(); });
+
+  // Global drop-anywhere for screenshots → opens Add Gear flow
+  const overlay = $('#global-drop-overlay');
+  let dragDepth = 0;
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
+  window.addEventListener('dragenter', (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth++;
+    if ($('#gear-modal').classList.contains('hidden')) overlay.classList.add('active');
+  });
+  window.addEventListener('dragover', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  window.addEventListener('dragleave', (e) => {
+    if (!isFileDrag(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) overlay.classList.remove('active');
+  });
+  window.addEventListener('drop', (e) => {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    overlay.classList.remove('active');
+    const f = e.dataTransfer.files?.[0];
+    if (f && f.type.startsWith('image/')) handleScreenshotFile(f);
+  });
+}
+
+// ------------------------------------------------------------------
+// Auth state + boot
 // ------------------------------------------------------------------
 async function onSignedIn(session) {
   currentUser = session.user;
-  $('user-email').textContent = currentUser.email || '';
+  $('#user-email').textContent = currentUser.email || '';
   showMain();
   await loadAll();
-
+  // Seed default activities on first login
   if (!activities.length) {
     const seed = [
       { name: 'Climbing', emoji: '🧗', position: 0 },
-      { name: 'Highlining', emoji: '🪢', position: 1 },
+      { name: 'Highlining', emoji: '🎪', position: 1 },
       { name: 'Paragliding', emoji: '🪂', position: 2 },
       { name: 'Hiking', emoji: '🥾', position: 3 },
     ];
@@ -1138,23 +1532,10 @@ function onSignedOut() {
   gearList = [];
   activities = [];
   itemsByActivity = {};
+  customFiltersByActivity = {};
   activeActivityId = null;
   showAuth();
 }
-
-supabase.auth.onAuthStateChange((event, session) => {
-  console.log('[auth] event:', event, 'session:', !!session);
-  if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-    cleanAuthParamsFromUrl();
-  }
-  if (session?.user) {
-    onSignedIn(session);
-  } else if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
-    // Only show auth on explicit sign-out or truly-no-session startup;
-    // do NOT clobber a SIGNED_IN in flight.
-    if (!session) onSignedOut();
-  }
-});
 
 async function consumeTokenHashFromUrl() {
   const params = new URLSearchParams(window.location.search);
@@ -1164,47 +1545,43 @@ async function consumeTokenHashFromUrl() {
   console.log('[auth] exchanging token_hash from URL, type=', type);
   const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
   cleanAuthParamsFromUrl();
-  if (error) {
-    console.warn('[auth] verifyOtp failed', error);
-    return { error };
-  }
+  if (error) { console.warn('[auth] verifyOtp failed', error); return { error }; }
   return { session: data?.session || null };
 }
 
+supabase.auth.onAuthStateChange((event, session) => {
+  console.log('[auth] event:', event, 'session:', !!session);
+  if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') cleanAuthParamsFromUrl();
+  if (session?.user) onSignedIn(session);
+  else if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+    if (!session) onSignedOut();
+  }
+});
+
+// ------------------------------------------------------------------
+// Init
+// ------------------------------------------------------------------
+wire();
+
 (async () => {
-  // Surface any error the Supabase verify endpoint appended to the hash
-  // (e.g. expired link, invalid token) before we process the session.
   const hashErr = readHashError();
   if (hashErr) {
-    setStatus(authStatusEl, `Sign-in link failed: ${hashErr}. Enter your email to get a new one.`, 'error');
+    setAuthStatus(`Sign-in link failed: ${hashErr}. Enter your email to get a new one.`, 'error');
     cleanAuthParamsFromUrl();
   }
-
   try {
-    // 1) New token_hash flow (custom email template): ?token_hash=…&type=…
-    //    This runs client-side so email link scanners can't pre-consume the token.
     const consumed = await consumeTokenHashFromUrl();
-    if (consumed?.session?.user) {
-      await onSignedIn(consumed.session);
-      return;
-    }
+    if (consumed?.session?.user) { await onSignedIn(consumed.session); return; }
     if (consumed?.error) {
-      setStatus(
-        authStatusEl,
+      setAuthStatus(
         `That sign-in link didn't work (${consumed.error.message}). Enter your email to get a fresh one.`,
         'error'
       );
     }
-
-    // 2) Fallback: implicit-flow hash (#access_token=…) or an already-stored session.
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error) console.warn('[auth] getSession error', error);
-    if (session?.user) {
-      cleanAuthParamsFromUrl();
-      await onSignedIn(session);
-    } else {
-      showAuth();
-    }
+    if (session?.user) { cleanAuthParamsFromUrl(); await onSignedIn(session); }
+    else showAuth();
   } catch (err) {
     console.error('[auth] boot error', err);
     showAuth();
