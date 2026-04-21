@@ -1184,13 +1184,24 @@ async function callExtractGear(payload) {
   const { data, error } = await supabase.functions.invoke('extract-gear', { body: payload });
   if (error) {
     let detail = '';
-    if (error.context && typeof error.context.json === 'function') {
-      try {
-        const parsed = await error.context.json();
-        detail = parsed?.error || '';
-      } catch (_) {}
+    let status = '';
+    const ctx = error.context;
+    if (ctx) {
+      if (typeof ctx.status === 'number') status = ` (${ctx.status})`;
+      if (typeof ctx.text === 'function') {
+        try {
+          const text = await ctx.text();
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              detail = parsed?.error || text;
+            } catch (_) { detail = text; }
+          }
+        } catch (_) {}
+      }
     }
-    throw new Error(detail || error.message || 'Extraction failed');
+    const base = detail || error.message || 'Extraction failed';
+    throw new Error(base.length > 200 ? base.slice(0, 200) + '…' + status : base + status);
   }
   return data?.data;
 }
