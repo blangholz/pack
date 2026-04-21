@@ -116,13 +116,11 @@ function extractOgImage(html: string, baseUrl: string): string | null {
   return null;
 }
 
-async function extractFromUrl(url: string) {
-  const html = (await fetchHtml(url)) || "";
+async function claudeExtractFromHtml(url: string, html: string) {
   const snippet = html
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .slice(0, 40_000);
-
   const prompt = [
     `Extract product details from this outdoor-gear page.`,
     `Product URL: ${url}`,
@@ -133,11 +131,45 @@ async function extractFromUrl(url: string) {
     "",
     EXTRACTION_SCHEMA,
   ].join("\n");
-
   const text = await callClaude([{ role: "user", content: prompt }], 800);
-  const data = normalize(coerceJson(text), url);
+  return normalize(coerceJson(text), url);
+}
 
-  // Prefer og:image from the actual page over Claude's guess.
+// Ask Claude for missing fields once we know the product identity.
+// A separate, focused prompt gets better recall than the multi-field schema.
+async function enrichByIdentity(name: string, brand: string | null) {
+  const prompt = [
+    `I've identified an outdoor-gear product. Use your knowledge to fill in the fields below.`,
+    ``,
+    `Brand: ${brand ?? "unknown"}`,
+    `Product: ${name}`,
+    ``,
+    `Return ONLY a JSON object — no markdown, no prose. Use null only if you genuinely have no knowledge:`,
+    `{`,
+    `  "weightGrams": number|null (weight of a single unit in grams; be specific, don't round vaguely),`,
+    `  "url": string|null (full product URL on the manufacturer's own site),`,
+    `  "imageUrl": string|null (direct https URL to the main product image)`,
+    `}`,
+  ].join("\n");
+  try {
+    const text = await callClaude([{ role: "user", content: prompt }], 300);
+    const raw = coerceJson(text);
+    const str = (v: any) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    const num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    return {
+      weightGrams: num(raw.weightGrams),
+      url: str(raw.url),
+      imageUrl: str(raw.imageUrl),
+    };
+  } catch {
+    return { weightGrams: null, url: null, imageUrl: null };
+  }
+}
+
+async function extractFromUrl(url: string) {
+  const html = (await fetchHtml(url)) || "";
+  const data = await claudeExtractFromHtml(url, html);
+  data.url = data.url || url;
   if (html) {
     const og = extractOgImage(html, url);
     if (og) data.imageUrl = og;
@@ -176,7 +208,19 @@ async function extractFromImage(image: { base64: string; mediaType: string }) {
   );
   const data = normalize(coerceJson(text), null);
 
-  // If Claude returned a product URL, fetch it to grab a clean og:image.
+  // Step 2: ask Claude — now that it's identified the product — to fill gaps
+  // in weight / manufacturer URL / image URL using its product knowledge.
+  if (data.name && (!data.weightGrams || !data.url || !data.imageUrl)) {
+    const enriched = await enrichByIdentity(data.name, data.brand);
+    data.weightGrams = data.weightGrams ?? enriched.weightGrams;
+    data.url = data.url || enriched.url;
+    data.imageUrl = data.imageUrl || enriched.imageUrl;
+  }
+
+  // Step 3: if we ended up with a URL, try to fetch it. If it responds,
+  // prefer its og:image for the thumbnail. If it 404s, drop the URL +
+  // imageUrl came from Claude's guess (likely unreliable) — but keep
+  // the URL field if Claude returned it directly from the screenshot.
   if (data.url) {
     const html = await fetchHtml(data.url);
     if (html) {
@@ -184,6 +228,7 @@ async function extractFromImage(image: { base64: string; mediaType: string }) {
       if (og) data.imageUrl = og;
     }
   }
+
   return data;
 }
 
