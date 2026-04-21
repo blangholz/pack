@@ -244,6 +244,15 @@ sender_name = "Pack"
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
 
+# Custom magic-link template: the link points directly at the Vercel site
+# with token_hash in the query string. The browser-side JS calls verifyOtp()
+# to exchange it, so email-provider link scanners (Gmail, Outlook) can't
+# prefetch the link and consume the single-use token before the real user
+# clicks it.
+[auth.email.template.magic_link]
+subject = "Your Pack sign-in link"
+content_path = "./supabase/templates/magic_link.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true

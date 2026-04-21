@@ -1,0 +1,11 @@
+<h2>Your Pack sign-in link</h2>
+<p>Click the button below to sign in to Pack. This link is single-use and expires in an hour.</p>
+<p>
+  <a
+    href="{{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=magiclink"
+    style="display:inline-block;padding:0.7rem 1.1rem;background:#3c63d8;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;"
+  >Sign in to Pack</a>
+</p>
+<p>Or paste this URL into your browser:</p>
+<p><code>{{ .SiteURL }}/?token_hash={{ .TokenHash }}&type=magiclink</code></p>
+<p style="color:#777;font-size:0.9rem;">If you didn't request this, you can ignore this email.</p>

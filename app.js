@@ -699,6 +699,21 @@ supabase.auth.onAuthStateChange((event, session) => {
   }
 });
 
+async function consumeTokenHashFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const token_hash = params.get('token_hash');
+  const type = params.get('type');
+  if (!token_hash || !type) return null;
+  console.log('[auth] exchanging token_hash from URL, type=', type);
+  const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
+  cleanAuthParamsFromUrl();
+  if (error) {
+    console.warn('[auth] verifyOtp failed', error);
+    return { error };
+  }
+  return { session: data?.session || null };
+}
+
 (async () => {
   // Surface any error the Supabase verify endpoint appended to the hash
   // (e.g. expired link, invalid token) before we process the session.
@@ -709,6 +724,22 @@ supabase.auth.onAuthStateChange((event, session) => {
   }
 
   try {
+    // 1) New token_hash flow (custom email template): ?token_hash=…&type=…
+    //    This runs client-side so email link scanners can't pre-consume the token.
+    const consumed = await consumeTokenHashFromUrl();
+    if (consumed?.session?.user) {
+      await onSignedIn(consumed.session);
+      return;
+    }
+    if (consumed?.error) {
+      setStatus(
+        authStatusEl,
+        `That sign-in link didn't work (${consumed.error.message}). Enter your email to get a fresh one.`,
+        'error'
+      );
+    }
+
+    // 2) Fallback: implicit-flow hash (#access_token=…) or an already-stored session.
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error) console.warn('[auth] getSession error', error);
     if (session?.user) {
