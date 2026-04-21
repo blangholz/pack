@@ -67,54 +67,56 @@ const WEATHER_TYPES = [
 ];
 
 // Known outdoor / climbing / paragliding brand palettes. Keys are lowercase.
+// `domain` is fetched via logo.clearbit.com to render a tiny logo image.
+// abbr/bg/fg are the fallback badge shown when the logo fails to load.
 const BRAND_STYLES = {
-  'black diamond':      { abbr: 'BD',  bg: '#0a0a0a', fg: '#FFC82E' },
-  'patagonia':          { abbr: 'P',   bg: '#0B3C5D', fg: '#F4B942' },
-  'arc\'teryx':         { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF' },
-  'arcteryx':           { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF' },
-  'the north face':     { abbr: 'TNF', bg: '#000000', fg: '#E8492D' },
-  'north face':         { abbr: 'TNF', bg: '#000000', fg: '#E8492D' },
-  'rei':                { abbr: 'REI', bg: '#006241', fg: '#FFFFFF' },
-  'rei co-op':          { abbr: 'REI', bg: '#006241', fg: '#FFFFFF' },
-  'mountain hardwear':  { abbr: 'MH',  bg: '#1B4E8C', fg: '#FFFFFF' },
-  'mammut':             { abbr: 'Mm',  bg: '#E4002B', fg: '#FFFFFF' },
-  'salewa':             { abbr: 'Sa',  bg: '#E30613', fg: '#FFFFFF' },
-  'petzl':              { abbr: 'Pz',  bg: '#F28C00', fg: '#000000' },
-  'osprey':             { abbr: 'Os',  bg: '#00857A', fg: '#FFFFFF' },
-  'gregory':            { abbr: 'Gr',  bg: '#2E4E3F', fg: '#FFFFFF' },
-  'msr':                { abbr: 'MSR', bg: '#E60023', fg: '#FFFFFF' },
-  'smartwool':          { abbr: 'SW',  bg: '#D7282F', fg: '#FFFFFF' },
-  'la sportiva':        { abbr: 'LS',  bg: '#FFC200', fg: '#000000' },
-  'scarpa':             { abbr: 'Sc',  bg: '#E4032E', fg: '#FFFFFF' },
-  'hyperlite mountain gear': { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000' },
-  'hyperlite':          { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000' },
-  'zpacks':             { abbr: 'Zp',  bg: '#2E7D32', fg: '#FFFFFF' },
-  'ortovox':            { abbr: 'Ov',  bg: '#1F7A33', fg: '#FFFFFF' },
-  'mystery ranch':      { abbr: 'MR',  bg: '#2F2F2F', fg: '#F28C00' },
-  'dmm':                { abbr: 'DMM', bg: '#ED1C24', fg: '#FFFFFF' },
-  'edelrid':            { abbr: 'Ed',  bg: '#FFC220', fg: '#000000' },
-  'fjallraven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF' },
-  'fjällräven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF' },
-  'columbia':           { abbr: 'Co',  bg: '#1B365C', fg: '#FFFFFF' },
-  'marmot':             { abbr: 'Mt',  bg: '#1A1A1A', fg: '#F28C00' },
-  'outdoor research':   { abbr: 'OR',  bg: '#3A4A5C', fg: '#FFFFFF' },
-  'sea to summit':      { abbr: 'S2S', bg: '#00A9CE', fg: '#FFFFFF' },
-  'therm-a-rest':       { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D' },
-  'thermarest':         { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D' },
-  'nemo':               { abbr: 'Ne',  bg: '#FF6B00', fg: '#FFFFFF' },
-  'big agnes':          { abbr: 'BA',  bg: '#006633', fg: '#FFFFFF' },
-  'garmin':             { abbr: 'Ga',  bg: '#000000', fg: '#007CC3' },
-  'gopro':              { abbr: 'GP',  bg: '#000000', fg: '#FFFFFF' },
-  'ozone':              { abbr: 'Oz',  bg: '#000000', fg: '#FFCC00' },
-  'advance':            { abbr: 'Ad',  bg: '#E4002B', fg: '#FFFFFF' },
-  'icaro':              { abbr: 'Ic',  bg: '#0055A5', fg: '#FFFFFF' },
-  'skywalk':            { abbr: 'Sk',  bg: '#003DA5', fg: '#FFFFFF' },
-  'gin gliders':        { abbr: 'Gin', bg: '#E30613', fg: '#FFFFFF' },
-  'niviuk':             { abbr: 'Nv',  bg: '#F28C00', fg: '#000000' },
-  'supair':             { abbr: 'Sp',  bg: '#003B5C', fg: '#FFFFFF' },
-  'gibbon':             { abbr: 'Gb',  bg: '#FF6B00', fg: '#FFFFFF' },
-  'balance community':  { abbr: 'BC',  bg: '#228B22', fg: '#FFFFFF' },
-  'slackline industries': { abbr: 'SLI', bg: '#FF4500', fg: '#FFFFFF' },
+  'black diamond':      { abbr: 'BD',  bg: '#0a0a0a', fg: '#FFC82E', domain: 'blackdiamondequipment.com' },
+  'patagonia':          { abbr: 'P',   bg: '#0B3C5D', fg: '#F4B942', domain: 'patagonia.com' },
+  'arc\'teryx':         { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF', domain: 'arcteryx.com' },
+  'arcteryx':           { abbr: 'Arc', bg: '#1A1A1A', fg: '#EFEFEF', domain: 'arcteryx.com' },
+  'the north face':     { abbr: 'TNF', bg: '#000000', fg: '#E8492D', domain: 'thenorthface.com' },
+  'north face':         { abbr: 'TNF', bg: '#000000', fg: '#E8492D', domain: 'thenorthface.com' },
+  'rei':                { abbr: 'REI', bg: '#006241', fg: '#FFFFFF', domain: 'rei.com' },
+  'rei co-op':          { abbr: 'REI', bg: '#006241', fg: '#FFFFFF', domain: 'rei.com' },
+  'mountain hardwear':  { abbr: 'MH',  bg: '#1B4E8C', fg: '#FFFFFF', domain: 'mountainhardwear.com' },
+  'mammut':             { abbr: 'Mm',  bg: '#E4002B', fg: '#FFFFFF', domain: 'mammut.com' },
+  'salewa':             { abbr: 'Sa',  bg: '#E30613', fg: '#FFFFFF', domain: 'salewa.com' },
+  'petzl':              { abbr: 'Pz',  bg: '#F28C00', fg: '#000000', domain: 'petzl.com' },
+  'osprey':             { abbr: 'Os',  bg: '#00857A', fg: '#FFFFFF', domain: 'osprey.com' },
+  'gregory':            { abbr: 'Gr',  bg: '#2E4E3F', fg: '#FFFFFF', domain: 'gregorypacks.com' },
+  'msr':                { abbr: 'MSR', bg: '#E60023', fg: '#FFFFFF', domain: 'msrgear.com' },
+  'smartwool':          { abbr: 'SW',  bg: '#D7282F', fg: '#FFFFFF', domain: 'smartwool.com' },
+  'la sportiva':        { abbr: 'LS',  bg: '#FFC200', fg: '#000000', domain: 'lasportiva.com' },
+  'scarpa':             { abbr: 'Sc',  bg: '#E4032E', fg: '#FFFFFF', domain: 'scarpa.com' },
+  'hyperlite mountain gear': { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000', domain: 'hyperlitemountaingear.com' },
+  'hyperlite':          { abbr: 'HMG', bg: '#C8C8C8', fg: '#000000', domain: 'hyperlitemountaingear.com' },
+  'zpacks':             { abbr: 'Zp',  bg: '#2E7D32', fg: '#FFFFFF', domain: 'zpacks.com' },
+  'ortovox':            { abbr: 'Ov',  bg: '#1F7A33', fg: '#FFFFFF', domain: 'ortovox.com' },
+  'mystery ranch':      { abbr: 'MR',  bg: '#2F2F2F', fg: '#F28C00', domain: 'mysteryranch.com' },
+  'dmm':                { abbr: 'DMM', bg: '#ED1C24', fg: '#FFFFFF', domain: 'dmmclimbing.com' },
+  'edelrid':            { abbr: 'Ed',  bg: '#FFC220', fg: '#000000', domain: 'edelrid.com' },
+  'fjallraven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF', domain: 'fjallraven.com' },
+  'fjällräven':         { abbr: 'Fj',  bg: '#B22222', fg: '#FFFFFF', domain: 'fjallraven.com' },
+  'columbia':           { abbr: 'Co',  bg: '#1B365C', fg: '#FFFFFF', domain: 'columbia.com' },
+  'marmot':             { abbr: 'Mt',  bg: '#1A1A1A', fg: '#F28C00', domain: 'marmot.com' },
+  'outdoor research':   { abbr: 'OR',  bg: '#3A4A5C', fg: '#FFFFFF', domain: 'outdoorresearch.com' },
+  'sea to summit':      { abbr: 'S2S', bg: '#00A9CE', fg: '#FFFFFF', domain: 'seatosummit.com' },
+  'therm-a-rest':       { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D', domain: 'thermarest.com' },
+  'thermarest':         { abbr: 'TaR', bg: '#F4B942', fg: '#0B3C5D', domain: 'thermarest.com' },
+  'nemo':               { abbr: 'Ne',  bg: '#FF6B00', fg: '#FFFFFF', domain: 'nemoequipment.com' },
+  'big agnes':          { abbr: 'BA',  bg: '#006633', fg: '#FFFFFF', domain: 'bigagnes.com' },
+  'garmin':             { abbr: 'Ga',  bg: '#000000', fg: '#007CC3', domain: 'garmin.com' },
+  'gopro':              { abbr: 'GP',  bg: '#000000', fg: '#FFFFFF', domain: 'gopro.com' },
+  'ozone':              { abbr: 'Oz',  bg: '#000000', fg: '#FFCC00', domain: 'flyozone.com' },
+  'advance':            { abbr: 'Ad',  bg: '#E4002B', fg: '#FFFFFF', domain: 'advance-thun.ch' },
+  'icaro':              { abbr: 'Ic',  bg: '#0055A5', fg: '#FFFFFF', domain: 'icaro-paragliders.com' },
+  'skywalk':            { abbr: 'Sk',  bg: '#003DA5', fg: '#FFFFFF', domain: 'skywalk.info' },
+  'gin gliders':        { abbr: 'Gin', bg: '#E30613', fg: '#FFFFFF', domain: 'gingliders.com' },
+  'niviuk':             { abbr: 'Nv',  bg: '#F28C00', fg: '#000000', domain: 'niviuk.com' },
+  'supair':             { abbr: 'Sp',  bg: '#003B5C', fg: '#FFFFFF', domain: 'supair.com' },
+  'gibbon':             { abbr: 'Gb',  bg: '#FF6B00', fg: '#FFFFFF', domain: 'gibbon-slacklines.com' },
+  'balance community':  { abbr: 'BC',  bg: '#228B22', fg: '#FFFFFF', domain: 'balancecommunity.com' },
+  'slackline industries': { abbr: 'SLI', bg: '#FF4500', fg: '#FFFFFF', domain: 'slacklineindustries.com' },
 };
 
 // ------------------------------------------------------------------
@@ -167,7 +169,7 @@ function escapeHost(url) {
 
 function gearImageEl(url, { className = '', alt = '' } = {}) {
   if (!url) return h('div', { class: ('placeholder-img ' + className).trim() }, '🎒');
-  const img = h('img', { src: url, alt, class: className });
+  const img = h('img', { src: url, alt, class: className, referrerpolicy: 'no-referrer' });
   let retriedProxy = false;
   img.addEventListener('error', () => {
     if (!retriedProxy && !url.startsWith('https://images.weserv.nl/')) {
@@ -224,14 +226,34 @@ function brandStyle(brand) {
     fg: '#ffffff',
   };
 }
-function brandBadgeEl(brand, { title } = {}) {
+function brandAbbrBadgeEl(brand, { title } = {}) {
   const s = brandStyle(brand);
   if (!s) return null;
   return h('span', {
-    class: 'brand-badge',
+    class: 'brand-badge brand-badge-abbr',
     style: `background: ${s.bg}; color: ${s.fg};`,
     title: title || brand,
   }, s.abbr);
+}
+function brandBadgeEl(brand, { title } = {}) {
+  const s = brandStyle(brand);
+  if (!s) return null;
+  if (!s.domain) return brandAbbrBadgeEl(brand, { title });
+  const label = title || brand;
+  const img = h('img', {
+    class: 'brand-badge brand-badge-logo',
+    src: `https://logo.clearbit.com/${s.domain}?size=80`,
+    alt: label,
+    title: label,
+    loading: 'lazy',
+    referrerpolicy: 'no-referrer',
+  });
+  img.addEventListener('error', () => {
+    const fallback = brandAbbrBadgeEl(brand, { title });
+    if (fallback) img.replaceWith(fallback);
+    else img.remove();
+  });
+  return img;
 }
 
 // ------------------------------------------------------------------
@@ -1063,6 +1085,7 @@ function resetGearForm() {
   $('#gear-delete-btn').classList.add('hidden');
   $('#fetch-status').textContent = '';
   resetScreenshotUI();
+  resetGearSearchUI();
   updateGearPreview();
 }
 
@@ -1095,12 +1118,26 @@ function readGearForm() {
   };
 }
 
+function setPreviewLoading(on) {
+  const wrap = document.querySelector('.gear-preview-img-wrap');
+  if (!wrap) return;
+  wrap.classList.toggle('loading', !!on);
+}
+
 function updateGearPreview() {
   const img = $('#gear-preview-img');
   const meta = $('#gear-preview-meta');
   const removeBtn = $('#gear-preview-img-remove');
   const url = $('#gear-image').value.trim();
   if (url) {
+    img.referrerPolicy = 'no-referrer';
+    img.dataset.retriedProxy = '';
+    img.onerror = () => {
+      if (!img.dataset.retriedProxy && !img.src.startsWith('https://images.weserv.nl/')) {
+        img.dataset.retriedProxy = '1';
+        img.src = 'https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//, ''));
+      }
+    };
     img.src = url;
     img.style.display = '';
     removeBtn.classList.remove('hidden');
@@ -1214,15 +1251,152 @@ async function callExtractGear(payload) {
     const base = detail || error.message || 'Extraction failed';
     throw new Error(base.length > 200 ? base.slice(0, 200) + '…' + status : base + status);
   }
-  return data?.data;
+  return data || {};
+}
+
+// ------------------------------------------------------------------
+// Gear search (autocomplete)
+// ------------------------------------------------------------------
+const SEARCH_DEBOUNCE_MS = 500;
+const SEARCH_MIN_CHARS = 3;
+const searchCache = new Map();
+let searchDebounce = null;
+let searchSeq = 0;
+
+function resetGearSearchUI() {
+  const input = $('#gear-search-input');
+  if (input) input.value = '';
+  hideGearSuggestions();
+  $('#gear-search-status').textContent = '';
+  $('#gear-search-spinner').classList.add('hidden');
+  searchSeq++;
+}
+
+function hideGearSuggestions() {
+  const box = $('#gear-search-suggestions');
+  box.innerHTML = '';
+  box.classList.add('hidden');
+}
+
+function renderGearSuggestions(items) {
+  const box = $('#gear-search-suggestions');
+  box.innerHTML = '';
+  if (!items.length) {
+    const empty = h('div', { class: 'gear-search-empty' }, 'No matches — try a more specific query.');
+    box.appendChild(empty);
+    box.classList.remove('hidden');
+    return;
+  }
+  for (const item of items) {
+    const btn = h('button', { type: 'button', class: 'gear-suggestion', role: 'option' });
+    const body = h('div', { class: 'gear-suggestion-body' });
+    body.appendChild(h('div', { class: 'gear-suggestion-name' }, item.name || '(unnamed)'));
+    const metaParts = [];
+    if (item.brand) metaParts.push(item.brand);
+    if (item.weightGrams != null) {
+      const v = gramsToUnit(item.weightGrams, displayUnit);
+      metaParts.push(displayUnit === 'g' ? `${Math.round(v)} g` : `${v.toFixed(2)} ${displayUnit}`);
+    }
+    if (item.quantity && item.quantity > 1) metaParts.push(`${item.quantity}-pack`);
+    if (metaParts.length) body.appendChild(h('div', { class: 'gear-suggestion-meta' }, metaParts.join(' · ')));
+    btn.appendChild(body);
+    btn.addEventListener('click', () => pickGearSuggestion(item));
+    box.appendChild(btn);
+  }
+  box.classList.remove('hidden');
+}
+
+async function runGearSearch(query) {
+  const mySeq = ++searchSeq;
+  const status = $('#gear-search-status');
+  const spinner = $('#gear-search-spinner');
+
+  if (searchCache.has(query)) {
+    const cached = searchCache.get(query);
+    if (mySeq !== searchSeq) return;
+    renderGearSuggestions(cached);
+    status.textContent = cached.length ? '' : 'No matches.';
+    return;
+  }
+
+  spinner.classList.remove('hidden');
+  status.textContent = 'Searching the web…';
+  try {
+    const res = await callExtractGear({ query });
+    if (mySeq !== searchSeq) return;
+    const suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
+    searchCache.set(query, suggestions);
+    renderGearSuggestions(suggestions);
+    status.textContent = suggestions.length ? '' : 'No matches — try a more specific query.';
+  } catch (err) {
+    if (mySeq !== searchSeq) return;
+    status.textContent = err.message || 'Search failed';
+    hideGearSuggestions();
+  } finally {
+    if (mySeq === searchSeq) spinner.classList.add('hidden');
+  }
+}
+
+function onGearSearchInput() {
+  const query = $('#gear-search-input').value.trim();
+  if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
+  if (query.length < SEARCH_MIN_CHARS) {
+    searchSeq++;
+    hideGearSuggestions();
+    $('#gear-search-status').textContent = '';
+    $('#gear-search-spinner').classList.add('hidden');
+    return;
+  }
+  searchDebounce = setTimeout(() => runGearSearch(query), SEARCH_DEBOUNCE_MS);
+}
+
+async function pickGearSuggestion(item) {
+  applyExtracted(item);
+  hideGearSuggestions();
+  $('#gear-search-input').value = item.name || '';
+  setPreviewLoading(true);
+  $('#gear-search-status').textContent = 'Fetching thumbnail…';
+
+  let merged = { ...item };
+  try {
+    // 1) If the suggestion has a URL, use the URL-based pipeline —
+    //    it's the most reliable for og:image + weight.
+    if (item.url) {
+      try {
+        const res = await callExtractGear({ url: item.url });
+        if (res.data) {
+          merged = { ...merged, ...res.data };
+          applyExtracted(merged);
+        }
+      } catch (_) { /* fall through to identity */ }
+    }
+    // 2) Always follow up with identity-based enrichment if we still
+    //    don't have a thumbnail — guarantees a web-search attempt.
+    if (!$('#gear-image').value && item.name) {
+      const res = await callExtractGear({
+        identity: { name: item.name, brand: item.brand || null },
+      });
+      if (res.data) {
+        merged = { ...merged, ...res.data };
+        applyExtracted(merged);
+      }
+    }
+    $('#gear-search-status').textContent = $('#gear-image').value
+      ? ''
+      : 'No thumbnail found — you can still save.';
+  } catch (err) {
+    $('#gear-search-status').textContent = 'Couldn\u2019t enrich: ' + err.message;
+  } finally {
+    setPreviewLoading(false);
+  }
 }
 
 async function extractFromUrl(url) {
   const status = $('#fetch-status');
   status.textContent = 'Fetching product page…';
   try {
-    const data = await callExtractGear({ url });
-    applyExtracted(data);
+    const res = await callExtractGear({ url });
+    applyExtracted(res.data);
     status.textContent = 'Filled in what we could find — review and save.';
   } catch (err) {
     status.textContent = err.message;
@@ -1290,8 +1464,8 @@ async function handleScreenshotFile(file) {
     setScreenshotState('preview');
     setScreenshotProgress('Reading the screenshot with Claude…');
     $('#fetch-status').textContent = '';
-    const data = await callExtractGear({ image: { base64, mediaType } });
-    applyExtracted(data);
+    const res = await callExtractGear({ image: { base64, mediaType } });
+    applyExtracted(res.data);
     setScreenshotProgress(null);
     $('#fetch-status').textContent = 'Filled in what we could see — review and save.';
   } catch (err) {
@@ -1469,6 +1643,14 @@ function wire() {
     const url = $('#gear-url').value.trim();
     if (!url) return;
     extractFromUrl(url);
+  });
+  $('#gear-search-input').addEventListener('input', onGearSearchInput);
+  $('#gear-search-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { hideGearSuggestions(); }
+  });
+  document.addEventListener('click', (e) => {
+    const within = e.target.closest && e.target.closest('.gear-search-field');
+    if (!within) hideGearSuggestions();
   });
   $('#gear-save-btn').addEventListener('click', handleSaveGear);
   $('#gear-delete-btn').addEventListener('click', handleDeleteGear);
