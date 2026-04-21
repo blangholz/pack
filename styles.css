@@ -29,6 +29,12 @@
 
 * { box-sizing: border-box; }
 
+/* Ensure the `hidden` attribute wins over authored display rules. */
+/* Without this, .auth-wrap{display:grid} beat [hidden]{display:none} */
+/* from the UA stylesheet and left the login card visible on top of */
+/* the signed-in view. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   background: var(--bg);
