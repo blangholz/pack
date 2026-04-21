@@ -65,8 +65,6 @@ function readHashError() {
 // ------------------------------------------------------------------
 // State
 // ------------------------------------------------------------------
-const LS_STATE_KEY = 'packlist.state.v1';
-const LS_IMPORTED_FLAG = 'packlist.imported.v1';
 const LS_UNIT_KEY = 'pack.displayUnit';
 
 let currentUser = null;
@@ -171,7 +169,6 @@ async function loadAll() {
   }
   setStatus(statusEl, '');
   render();
-  maybeShowImportBanner();
 }
 
 // ------------------------------------------------------------------
@@ -528,163 +525,6 @@ unitSelect.addEventListener('change', () => {
 });
 
 // ------------------------------------------------------------------
-// Local-data import
-// ------------------------------------------------------------------
-function readLocalPackState() {
-  try {
-    const raw = localStorage.getItem(LS_STATE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function maybeShowImportBanner() {
-  const banner = $('import-banner');
-  const imported = localStorage.getItem(LS_IMPORTED_FLAG);
-  if (imported) return (banner.hidden = true);
-  const local = readLocalPackState();
-  if (!local) return (banner.hidden = true);
-  const gearCount = (local.gear || []).length;
-  const actCount = (local.activities || []).length;
-  if (!gearCount && !actCount) return (banner.hidden = true);
-  $('import-summary').textContent =
-    ` ${gearCount} gear · ${actCount} list${actCount === 1 ? '' : 's'} stored in this browser.`;
-  banner.hidden = false;
-}
-
-$('import-dismiss').addEventListener('click', () => {
-  localStorage.setItem(LS_IMPORTED_FLAG, `dismissed:${new Date().toISOString()}`);
-  $('import-banner').hidden = true;
-});
-
-$('paste-import-btn').addEventListener('click', async () => {
-  const raw = $('paste-json').value.trim();
-  if (!raw) {
-    setStatus(statusEl, 'Paste the exported JSON first.', 'error');
-    return;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    setStatus(statusEl, `Not valid JSON: ${err.message}`, 'error');
-    return;
-  }
-  if (!parsed || typeof parsed !== 'object' || (!parsed.gear && !parsed.activities)) {
-    setStatus(statusEl, 'JSON has no "gear" or "activities" key — are you sure this is a packlist.state.v1 blob?', 'error');
-    return;
-  }
-  const btn = $('paste-import-btn');
-  btn.disabled = true;
-  btn.textContent = 'Importing…';
-  try {
-    await importLocalPackState(parsed);
-    $('paste-json').value = '';
-    btn.disabled = false;
-    btn.textContent = 'Import pasted JSON';
-    await loadAll();
-    setStatus(statusEl, 'Imported pasted gear & lists.', 'ok');
-  } catch (err) {
-    console.error(err);
-    setStatus(statusEl, `Import failed: ${err.message || err}`, 'error');
-    btn.disabled = false;
-    btn.textContent = 'Import pasted JSON';
-  }
-});
-
-$('import-btn').addEventListener('click', async () => {
-  const local = readLocalPackState();
-  if (!local) return;
-  const btn = $('import-btn');
-  btn.disabled = true;
-  btn.textContent = 'Importing…';
-  try {
-    await importLocalPackState(local);
-    localStorage.setItem(LS_IMPORTED_FLAG, `ok:${new Date().toISOString()}`);
-    $('import-banner').hidden = true;
-    await loadAll();
-    setStatus(statusEl, 'Imported local gear & lists.', 'ok');
-  } catch (err) {
-    console.error(err);
-    setStatus(statusEl, `Import failed: ${err.message || err}`, 'error');
-    btn.disabled = false;
-    btn.textContent = 'Import to my account';
-  }
-});
-
-async function importLocalPackState(local) {
-  const gearIdMap = new Map();
-  const gearRows = (local.gear || []).map((g) => ({
-    name: g.name || 'Untitled',
-    brand: g.brand || null,
-    weight_grams:
-      typeof g.weightGrams === 'number'
-        ? g.weightGrams
-        : g.weight_grams ?? null,
-    url: g.url || null,
-    image_url: g.imageUrl || g.image_url || null,
-    notes: g.notes || null,
-    color: g.color || null,
-    available_colors: g.availableColors || g.available_colors || [],
-    quantity: Math.max(0, Math.round(Number(g.quantity) || 1)),
-  }));
-
-  if (gearRows.length) {
-    const { data, error } = await supabase.from('gear').insert(gearRows).select();
-    if (error) throw error;
-    (local.gear || []).forEach((g, i) => gearIdMap.set(g.id, data[i].id));
-  }
-
-  const actRows = (local.activities || []).map((a, i) => ({
-    name: a.name || `Activity ${i + 1}`,
-    emoji: a.emoji || null,
-    position: i,
-    active_weathers: a.activeWeathers || a.active_weathers || [],
-  }));
-
-  let insertedActs = [];
-  if (actRows.length) {
-    const { data, error } = await supabase.from('activities').insert(actRows).select();
-    if (error) throw error;
-    insertedActs = data;
-  }
-
-  const itemRows = [];
-  (local.activities || []).forEach((a, i) => {
-    const newAct = insertedActs[i];
-    if (!newAct) return;
-    (a.items || []).forEach((it, j) => {
-      const newGearId = gearIdMap.get(it.gearId || it.gear_id);
-      if (!newGearId) return;
-      itemRows.push({
-        activity_id: newAct.id,
-        gear_id: newGearId,
-        position: j,
-        packed: !!it.packed,
-        quantity: Math.max(0, Math.round(Number(it.quantity) || 1)),
-        note: it.note || null,
-        weather_tags: it.weatherTags || it.weather_tags || [],
-      });
-    });
-  });
-
-  if (itemRows.length) {
-    const { error } = await supabase.from('activity_items').insert(itemRows);
-    if (error) throw error;
-  }
-
-  if (local.settings?.displayUnit) {
-    displayUnit = local.settings.displayUnit;
-    localStorage.setItem(LS_UNIT_KEY, displayUnit);
-    unitSelect.value = displayUnit;
-  }
-}
-
-// ------------------------------------------------------------------
 // Bootstrap + auth state wiring
 // ------------------------------------------------------------------
 async function onSignedIn(session) {
@@ -693,9 +533,7 @@ async function onSignedIn(session) {
   showMain();
   await loadAll();
 
-  // Seed default activities if the user has none AND no local data to import.
-  const localHasData = !!readLocalPackState();
-  if (!activities.length && !localHasData) {
+  if (!activities.length) {
     const seed = [
       { name: 'Climbing', emoji: '🧗', position: 0 },
       { name: 'Highlining', emoji: '🪢', position: 1 },
