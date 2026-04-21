@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pack — Gear & Activity Lists</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">⛰</span>
+      <h1>Pack</h1>
+    </div>
+    <div class="header-actions">
+      <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
+      <button id="settings-btn" class="btn btn-ghost" title="Settings">⚙</button>
+      <button id="add-gear-btn" class="btn btn-primary">+ Add gear</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- Gear Library -->
+    <aside class="gear-library" aria-label="Gear Library">
+      <div class="library-header">
+        <h2>Gear Library</h2>
+        <div class="library-header-right">
+          <span id="gear-count" class="muted"></span>
+          <button id="library-edit-toggle" class="btn btn-ghost btn-sm" type="button" aria-pressed="false">Edit</button>
+        </div>
+      </div>
+      <input id="gear-search" class="gear-search" type="search" placeholder="🔍 Search gear…" />
+      <div id="brand-filter-pills" class="brand-filter-pills hidden" aria-label="Filter by brand"></div>
+      <div id="gear-list" class="gear-list" aria-live="polite">
+        <!-- gear cards rendered here -->
+      </div>
+      <div id="gear-empty" class="empty-state hidden">
+        <p>No gear yet.</p>
+        <p class="muted">Click <strong>+ Add gear</strong> to paste a product URL.</p>
+      </div>
+    </aside>
+
+    <!-- Activity Panel -->
+    <section class="activity-panel" aria-label="Activities">
+      <div class="activity-tabs" id="activity-tabs" role="tablist">
+        <!-- tabs rendered here; + button appended -->
+      </div>
+
+      <div class="custom-filter" id="custom-filter" aria-label="Custom sub-filters">
+        <span class="custom-filter-label muted">Filters</span>
+        <div class="custom-filter-pills" id="custom-filter-pills">
+          <!-- rendered here; + button always appended -->
+        </div>
+        <span id="custom-filter-hint" class="muted custom-filter-hint"></span>
+      </div>
+
+      <div class="weather-filter" id="weather-filter" aria-label="Filter clothing by weather">
+        <span class="weather-filter-label muted">Weather</span>
+        <div class="weather-toggles" id="weather-toggles">
+          <!-- weather toggle buttons rendered here -->
+        </div>
+        <span id="weather-filter-hint" class="muted weather-filter-hint"></span>
+      </div>
+
+      <div class="activity-body" id="activity-body">
+        <div id="activity-list" class="activity-list" aria-live="polite">
+          <!-- list items rendered here -->
+        </div>
+        <div id="activity-empty" class="empty-state hidden">
+          <p>Nothing packed yet.</p>
+          <p class="muted">Drag gear from the library into this list.</p>
+        </div>
+      </div>
+
+      <footer class="activity-footer" id="activity-footer">
+        <div class="totals">
+          <span id="activity-total">Total: 0 g</span>
+          <span id="activity-packed" class="muted"></span>
+        </div>
+        <div class="activity-actions">
+          <button id="reset-checklist-btn" class="btn btn-ghost">Reset checklist</button>
+          <button id="edit-activity-btn" class="btn btn-ghost">Edit activity</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <!-- Drop target for removing an item from an activity -->
+  <div id="remove-dropzone" class="remove-dropzone hidden">🗑 Drop to remove</div>
+
+  <!-- Fullscreen overlay shown when a file is dragged anywhere over the window -->
+  <div id="global-drop-overlay" class="global-drop-overlay" aria-hidden="true">
+    <div class="global-drop-card">
+      <div class="global-drop-icon">🖼️</div>
+      <div class="global-drop-title">Drop screenshot to add gear</div>
+      <div class="global-drop-sub">Release anywhere on the page</div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <!-- ========== MODALS ========== -->
+
+  <!-- Add / Edit Gear Modal -->
+  <div id="gear-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="gear-modal-title">
+    <div class="modal-backdrop" data-close="gear-modal"></div>
+    <div class="modal-panel">
+      <header class="modal-header">
+        <h3 id="gear-modal-title">Add gear</h3>
+        <button class="icon-btn" data-close="gear-modal" aria-label="Close">×</button>
+      </header>
+
+      <div class="modal-body">
+        <!-- Section 1: Screenshot drop (primary action) -->
+        <div class="section-label">① Drop a screenshot <span class="muted">(recommended)</span></div>
+        <div id="screenshot-dropzone" class="screenshot-dropzone" tabindex="0">
+          <div class="dropzone-idle">
+            <div class="dropzone-icon">🖼️</div>
+            <div class="dropzone-title">Drop a product screenshot here</div>
+            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+          </div>
+          <div class="dropzone-preview hidden">
+            <img id="screenshot-preview" alt="Screenshot preview" />
+            <div id="screenshot-preview-status" class="dropzone-bg-status muted hidden"></div>
+            <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+          </div>
+          <div class="dropzone-loading hidden">
+            <div class="spinner"></div>
+            <div id="screenshot-status">Analyzing screenshot…</div>
+          </div>
+        </div>
+        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
+
+        <!-- Section 2: URL -->
+        <div class="section-label">② Or paste a product URL</div>
+        <div class="field">
+          <div class="input-row">
+            <input id="gear-url" type="url" placeholder="https://blackdiamondequipment.com/…" />
+            <button id="fetch-details-btn" class="btn btn-secondary">Fetch</button>
+          </div>
+          <p id="fetch-status" class="field-hint muted"></p>
+        </div>
+
+        <!-- Section 3: Manual -->
+        <div class="section-label">③ Or edit details manually</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="gear-name">Name</label>
+            <input id="gear-name" type="text" placeholder="BD Solution Harness" />
+          </div>
+          <div class="field">
+            <label for="gear-brand">Brand</label>
+            <input id="gear-brand" type="text" placeholder="Black Diamond" />
+          </div>
+          <div class="field">
+            <label for="gear-weight">Weight (<span id="gear-weight-unit">g</span>)</label>
+            <input id="gear-weight" type="number" step="0.1" min="0" placeholder="347" />
+          </div>
+          <div class="field">
+            <label for="gear-quantity">Quantity owned</label>
+            <input id="gear-quantity" type="number" step="1" min="1" placeholder="1" />
+          </div>
+          <div class="field full">
+            <label for="gear-image">Image URL</label>
+            <input id="gear-image" type="url" placeholder="https://…" />
+            <input type="file" id="gear-image-file-input" accept="image/*" class="hidden" />
+          </div>
+          <div class="field full color-field">
+            <label>Color <span class="muted">(pick to match the one you own)</span></label>
+            <div id="gear-colors" class="color-chips"></div>
+            <div class="color-row">
+              <input id="gear-color" type="text" placeholder="e.g. Grey / Black / Blue" />
+              <button id="gear-color-find-btn" class="btn btn-secondary" type="button" disabled>Find image</button>
+            </div>
+            <p id="gear-color-hint" class="field-hint muted"></p>
+          </div>
+          <div class="field full">
+            <label for="gear-notes">Notes</label>
+            <textarea id="gear-notes" rows="2" placeholder="Size M, red, bought 2025"></textarea>
+          </div>
+        </div>
+
+        <div class="gear-preview" id="gear-preview">
+          <div class="gear-preview-img-wrap">
+            <img id="gear-preview-img" alt="" />
+            <button id="gear-preview-img-remove" class="gear-preview-remove hidden" type="button" aria-label="Remove image" title="Remove image">×</button>
+          </div>
+          <div id="gear-preview-meta" class="muted"></div>
+          <button id="gear-image-upload-btn" class="btn btn-secondary" type="button">Upload new</button>
+        </div>
+      </div>
+
+      <footer class="modal-footer">
+        <button id="improve-ai-btn" class="btn btn-ghost" title="Re-run extraction with Claude">✨ Improve with AI</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close="gear-modal">Cancel</button>
+        <button id="gear-delete-btn" class="btn btn-danger hidden">Delete</button>
+        <button id="gear-save-btn" class="btn btn-primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-backdrop" data-close="settings-modal"></div>
+    <div class="modal-panel">
+      <header class="modal-header">
+        <h3 id="settings-title">Settings</h3>
+        <button class="icon-btn" data-close="settings-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="field">
+          <label for="setting-unit">Display unit</label>
+          <select id="setting-unit">
+            <option value="g">grams (g)</option>
+            <option value="kg">kilograms (kg)</option>
+            <option value="oz">ounces (oz)</option>
+            <option value="lb">pounds (lb)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="setting-api-key">Anthropic API key (optional)</label>
+          <input id="setting-api-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+          <p class="field-hint muted">
+            Enables <em>✨ Improve with AI</em> for better gear auto-fill. Stored in your browser's localStorage only — visible in DevTools. Only use on a personal device.
+          </p>
+        </div>
+        <div class="field">
+          <label>Danger zone</label>
+          <button id="reset-all-btn" class="btn btn-danger">Erase all data</button>
+          <p class="field-hint muted">Clears gear, activities, and settings. Cannot be undone.</p>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close="settings-modal">Cancel</button>
+        <button id="settings-save-btn" class="btn btn-primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Activity rename / create modal -->
+  <div id="activity-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="activity-modal-title">
+    <div class="modal-backdrop" data-close="activity-modal"></div>
+    <div class="modal-panel modal-narrow">
+      <header class="modal-header">
+        <h3 id="activity-modal-title">New activity</h3>
+        <button class="icon-btn" data-close="activity-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <div class="field">
+          <label for="activity-emoji">Emoji</label>
+          <input id="activity-emoji" type="text" maxlength="4" placeholder="🧗" />
+        </div>
+        <div class="field">
+          <label for="activity-name">Name</label>
+          <input id="activity-name" type="text" placeholder="Climbing" />
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button id="activity-delete-btn" class="btn btn-danger hidden">Delete</button>
+        <button id="activity-duplicate-btn" class="btn btn-ghost hidden">Duplicate</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close="activity-modal">Cancel</button>
+        <button id="activity-save-btn" class="btn btn-primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
