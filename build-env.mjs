@@ -15,8 +15,8 @@ if (existsSync('.env')) {
 }
 
 const env = {
-  SUPABASE_URL: process.env.SUPABASE_URL || '',
-  SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || '',
+  SUPABASE_URL: (process.env.SUPABASE_URL || '').trim(),
+  SUPABASE_ANON_KEY: (process.env.SUPABASE_ANON_KEY || '').trim(),
 };
 
 const missing = Object.entries(env).filter(([, v]) => !v).map(([k]) => k);
