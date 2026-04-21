@@ -561,6 +561,41 @@ $('import-dismiss').addEventListener('click', () => {
   $('import-banner').hidden = true;
 });
 
+$('paste-import-btn').addEventListener('click', async () => {
+  const raw = $('paste-json').value.trim();
+  if (!raw) {
+    setStatus(statusEl, 'Paste the exported JSON first.', 'error');
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    setStatus(statusEl, `Not valid JSON: ${err.message}`, 'error');
+    return;
+  }
+  if (!parsed || typeof parsed !== 'object' || (!parsed.gear && !parsed.activities)) {
+    setStatus(statusEl, 'JSON has no "gear" or "activities" key — are you sure this is a packlist.state.v1 blob?', 'error');
+    return;
+  }
+  const btn = $('paste-import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importing…';
+  try {
+    await importLocalPackState(parsed);
+    $('paste-json').value = '';
+    btn.disabled = false;
+    btn.textContent = 'Import pasted JSON';
+    await loadAll();
+    setStatus(statusEl, 'Imported pasted gear & lists.', 'ok');
+  } catch (err) {
+    console.error(err);
+    setStatus(statusEl, `Import failed: ${err.message || err}`, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Import pasted JSON';
+  }
+});
+
 $('import-btn').addEventListener('click', async () => {
   const local = readLocalPackState();
   if (!local) return;

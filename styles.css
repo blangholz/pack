@@ -148,6 +148,29 @@ input:focus, textarea:focus, select:focus {
 }
 .import-actions { display: flex; gap: 0.5rem; }
 
+.paste-import {
+  margin: 0.5rem 0 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.paste-import summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.paste-import summary:hover { color: var(--fg); }
+.paste-import[open] summary { color: var(--fg); margin-bottom: 0.5rem; }
+.paste-help { font-size: 0.85rem; margin: 0.5rem 0; line-height: 1.6; }
+.paste-help code {
+  background: var(--panel-2);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+#paste-json { width: 100%; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.8rem; }
+
 .layout {
   display: grid;
   grid-template-columns: 360px 1fr;

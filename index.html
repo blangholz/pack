@@ -58,6 +58,21 @@
       </div>
     </div>
 
+    <details class="paste-import">
+      <summary>Import gear from another browser (paste JSON)</summary>
+      <p class="muted paste-help">
+        On the browser/URL where you used the local app, open DevTools &rarr; Console and run:
+        <br />
+        <code>copy(localStorage.getItem('packlist.state.v1'))</code>
+        <br />
+        Then paste the result below and click <strong>Import pasted JSON</strong>.
+      </p>
+      <textarea id="paste-json" rows="5" placeholder='{"gear":[…],"activities":[…]}'></textarea>
+      <div class="row right">
+        <button id="paste-import-btn" class="btn btn-primary">Import pasted JSON</button>
+      </div>
+    </details>
+
     <div class="layout">
       <!-- Gear library -->
       <section class="gear-panel">
