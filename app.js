@@ -67,7 +67,7 @@ const WEATHER_TYPES = [
 ];
 
 // Known outdoor / climbing / paragliding brand palettes. Keys are lowercase.
-// `domain` is fetched via logo.clearbit.com to render a tiny logo image.
+// `domain` is fetched via icon.horse to render a tiny logo image.
 // abbr/bg/fg are the fallback badge shown when the logo fails to load.
 const BRAND_STYLES = {
   'black diamond':      { abbr: 'BD',  bg: '#0a0a0a', fg: '#FFC82E', domain: 'blackdiamondequipment.com' },
@@ -242,7 +242,7 @@ function brandBadgeEl(brand, { title } = {}) {
   const label = title || brand;
   const img = h('img', {
     class: 'brand-badge brand-badge-logo',
-    src: `https://logo.clearbit.com/${s.domain}?size=80`,
+    src: `https://icon.horse/icon/${s.domain}`,
     alt: label,
     title: label,
     loading: 'lazy',
