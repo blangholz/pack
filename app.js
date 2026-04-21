@@ -21,15 +21,46 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error('missing-env');
 }
 
+// Use implicit flow for magic links: Supabase appends the access/refresh
+// tokens in the URL hash after redirect, so no PKCE code_verifier is needed.
+// (PKCE breaks if the link is opened in a different browser/tab from the one
+// that requested it, or if localStorage was cleared in between — which is what
+// caused the previous post-click loop back to the email entry screen.)
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    flowType: 'pkce',
+    flowType: 'implicit',
     storageKey: 'pack.auth.v1',
   },
 });
+
+function cleanAuthParamsFromUrl() {
+  const url = new URL(window.location.href);
+  let dirty = false;
+  if (url.hash && /access_token|refresh_token|error|type=/.test(url.hash)) {
+    url.hash = '';
+    dirty = true;
+  }
+  for (const k of ['code', 'error', 'error_description', 'error_code', 'token_hash', 'type']) {
+    if (url.searchParams.has(k)) {
+      url.searchParams.delete(k);
+      dirty = true;
+    }
+  }
+  if (dirty) history.replaceState({}, '', url.toString());
+}
+
+function readHashError() {
+  const h = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const p = new URLSearchParams(h);
+  const err = p.get('error') || p.get('error_code');
+  if (!err) return null;
+  return p.get('error_description') || err;
+}
 
 // ------------------------------------------------------------------
 // State
@@ -655,18 +686,39 @@ function onSignedOut() {
 }
 
 supabase.auth.onAuthStateChange((event, session) => {
+  console.log('[auth] event:', event, 'session:', !!session);
+  if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+    cleanAuthParamsFromUrl();
+  }
   if (session?.user) {
     onSignedIn(session);
-  } else {
-    onSignedOut();
+  } else if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+    // Only show auth on explicit sign-out or truly-no-session startup;
+    // do NOT clobber a SIGNED_IN in flight.
+    if (!session) onSignedOut();
   }
 });
 
 (async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.user) {
-    await onSignedIn(session);
-  } else {
+  // Surface any error the Supabase verify endpoint appended to the hash
+  // (e.g. expired link, invalid token) before we process the session.
+  const hashErr = readHashError();
+  if (hashErr) {
+    setStatus(authStatusEl, `Sign-in link failed: ${hashErr}. Enter your email to get a new one.`, 'error');
+    cleanAuthParamsFromUrl();
+  }
+
+  try {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) console.warn('[auth] getSession error', error);
+    if (session?.user) {
+      cleanAuthParamsFromUrl();
+      await onSignedIn(session);
+    } else {
+      showAuth();
+    }
+  } catch (err) {
+    console.error('[auth] boot error', err);
     showAuth();
   }
 })();
