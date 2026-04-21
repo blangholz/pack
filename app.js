@@ -1181,21 +1181,18 @@ function applyExtracted(data) {
 }
 
 async function callExtractGear(payload) {
-  const { data: sessionRes } = await supabase.auth.getSession();
-  const token = sessionRes?.session?.access_token;
-  if (!token) throw new Error('Not signed in');
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/extract-gear`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${token}`,
-      apikey: SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify(payload),
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body?.error || `Extraction failed (${res.status})`);
-  return body.data;
+  const { data, error } = await supabase.functions.invoke('extract-gear', { body: payload });
+  if (error) {
+    let detail = '';
+    if (error.context && typeof error.context.json === 'function') {
+      try {
+        const parsed = await error.context.json();
+        detail = parsed?.error || '';
+      } catch (_) {}
+    }
+    throw new Error(detail || error.message || 'Extraction failed');
+  }
+  return data?.data;
 }
 
 async function extractFromUrl(url) {
