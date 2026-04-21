@@ -53,26 +53,11 @@
       <section class="gear-panel">
         <div class="panel-hdr">
           <h2>Gear library</h2>
-          <button id="add-gear-toggle" class="btn btn-primary">+ Add gear</button>
-        </div>
-
-        <form id="add-gear-form" class="add-gear-form" hidden>
-          <input id="gear-name" type="text" placeholder="Name (required)" required />
           <div class="row">
-            <input id="gear-weight" type="number" step="0.01" placeholder="Weight" />
-            <span id="gear-weight-unit" class="muted">g</span>
-            <input id="gear-quantity" type="number" min="0" step="1" value="1" />
-            <span class="muted">qty</span>
+            <button id="edit-gear-toggle" class="btn btn-ghost">Edit</button>
+            <button id="add-gear-toggle" class="btn btn-primary">+ Add gear</button>
           </div>
-          <input id="gear-brand" type="text" placeholder="Brand (optional)" />
-          <input id="gear-url" type="url" placeholder="Product URL (optional)" />
-          <input id="gear-image" type="url" placeholder="Image URL (optional)" />
-          <textarea id="gear-notes" rows="2" placeholder="Notes (optional)"></textarea>
-          <div class="row right">
-            <button type="button" id="gear-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="submit" class="btn btn-primary">Save gear</button>
-          </div>
-        </form>
+        </div>
 
         <input id="gear-search" type="search" placeholder="Search gear…" class="gear-search" />
         <ul id="gear-list" class="gear-list"></ul>
@@ -90,6 +75,18 @@
               <button id="delete-activity" class="btn btn-ghost danger">Delete</button>
             </div>
           </div>
+          <div id="filter-bar" class="filter-bar" hidden>
+            <div class="filter-group">
+              <span class="filter-label">Weather</span>
+              <div id="weather-filter-chips" class="chip-row"></div>
+            </div>
+            <div class="filter-group">
+              <span class="filter-label">Filters</span>
+              <div id="custom-filter-chips" class="chip-row"></div>
+              <button id="add-custom-filter" class="btn btn-ghost chip-btn" type="button">+ Add filter</button>
+              <button id="edit-custom-filters" class="btn btn-ghost chip-btn" type="button">Edit</button>
+            </div>
+          </div>
           <ul id="activity-items" class="activity-items"></ul>
           <div id="activity-footer" class="activity-footer muted"></div>
         </div>
@@ -98,6 +95,62 @@
 
     <p id="status" class="status muted" role="status" aria-live="polite"></p>
   </main>
+
+  <!-- Add-gear modal (overlay) -->
+  <div id="gear-modal" class="modal-backdrop" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="gear-modal-title">
+      <div class="modal-hdr">
+        <h2 id="gear-modal-title">Add gear</h2>
+        <button id="gear-modal-close" class="btn btn-ghost" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <div id="gear-dropzone" class="dropzone" tabindex="0">
+        <div class="dropzone-idle">
+          <div class="dropzone-title">Paste a product URL or drop a screenshot</div>
+          <div class="dropzone-sub muted">Drag an image anywhere on the page — we'll pull out the details.</div>
+          <div class="row" style="margin-top: 0.6rem; gap: 0.4rem;">
+            <input id="gear-url-input" type="url" placeholder="https://…" autocomplete="off" />
+            <button id="gear-url-fetch" type="button" class="btn btn-primary">Fetch</button>
+          </div>
+          <div class="dropzone-or muted">or</div>
+          <label class="btn btn-ghost" for="gear-file-input">Choose screenshot…</label>
+          <input id="gear-file-input" type="file" accept="image/*" hidden />
+        </div>
+        <div class="dropzone-preview" hidden>
+          <img id="gear-preview-img" alt="screenshot preview" />
+          <button id="gear-preview-clear" class="btn btn-ghost" type="button">Use a different image</button>
+        </div>
+        <div class="dropzone-loading" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <div id="gear-loading-msg" class="muted">Reading…</div>
+        </div>
+      </div>
+
+      <form id="add-gear-form" class="add-gear-form">
+        <input id="gear-name" type="text" placeholder="Name (required)" required />
+        <div class="row">
+          <input id="gear-weight" type="number" step="0.01" placeholder="Weight" />
+          <span id="gear-weight-unit" class="muted">g</span>
+          <input id="gear-quantity" type="number" min="0" step="1" value="1" />
+          <span class="muted">qty</span>
+        </div>
+        <input id="gear-brand" type="text" placeholder="Brand (optional)" />
+        <input id="gear-url" type="url" placeholder="Product URL (optional)" />
+        <input id="gear-image" type="url" placeholder="Image URL (optional)" />
+        <textarea id="gear-notes" rows="2" placeholder="Notes (optional)"></textarea>
+        <p id="gear-modal-status" class="status muted" role="status" aria-live="polite"></p>
+        <div class="row right">
+          <button type="button" id="gear-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save gear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Drop-anywhere splash shown while the user is dragging a file over the window -->
+  <div id="global-drop-splash" class="global-drop-splash" hidden>
+    <div class="global-drop-splash-inner">Drop screenshot to add gear</div>
+  </div>
 
   <script src="env.js"></script>
   <script type="module" src="app.js"></script>
