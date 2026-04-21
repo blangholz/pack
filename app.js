@@ -1156,7 +1156,7 @@ function updateGearPreview() {
 function openAddGear() {
   resetGearForm();
   showModal('gear-modal');
-  requestAnimationFrame(() => $('#gear-url').focus());
+  requestAnimationFrame(() => $('#gear-search-input').focus());
 }
 
 function openEditGear(id) {
@@ -1171,22 +1171,60 @@ function openEditGear(id) {
 }
 
 async function handleSaveGear() {
+  enrichmentSeq++; // cancel any in-flight foreground enrichment
   const payload = readGearForm();
   if (!payload.name) { $('#fetch-status').textContent = 'Name is required.'; return; }
+  let saved;
   if (editingGearId) {
     const { data, error } = await supabase.from('gear').update(payload).eq('id', editingGearId).select().single();
     if (error) { toast(error.message, 'error'); return; }
     const idx = gearList.findIndex((g) => g.id === editingGearId);
     if (idx >= 0) gearList[idx] = data;
-    hideModal('gear-modal');
-    render();
-    return;
+    saved = data;
+  } else {
+    const { data, error } = await supabase.from('gear').insert(payload).select().single();
+    if (error) { toast(error.message, 'error'); return; }
+    gearList.unshift(data);
+    saved = data;
   }
-  const { data, error } = await supabase.from('gear').insert(payload).select().single();
-  if (error) { toast(error.message, 'error'); return; }
-  gearList.unshift(data);
   hideModal('gear-modal');
   render();
+  if (saved && !saved.image_url && saved.name) {
+    backgroundEnrichThumbnail(saved).catch(() => { /* silent */ });
+  }
+}
+
+// After a gear is saved without a thumbnail, keep trying in the background.
+// When an image is found, patch the row and re-render the library.
+async function backgroundEnrichThumbnail(gear) {
+  let imageUrl = null;
+  if (gear.url) {
+    try {
+      const res = await callExtractGear({ url: gear.url });
+      if (res.data?.imageUrl) imageUrl = res.data.imageUrl;
+    } catch (_) {}
+  }
+  if (!imageUrl) {
+    try {
+      const res = await callExtractGear({
+        identity: { name: gear.name, brand: gear.brand || null },
+      });
+      if (res.data?.imageUrl) imageUrl = res.data.imageUrl;
+    } catch (_) {}
+  }
+  if (!imageUrl) return;
+  const { data, error } = await supabase
+    .from('gear')
+    .update({ image_url: imageUrl })
+    .eq('id', gear.id)
+    .select()
+    .single();
+  if (error || !data) return;
+  const idx = gearList.findIndex((g) => g.id === gear.id);
+  if (idx >= 0) {
+    gearList[idx] = data;
+    render();
+  }
 }
 
 async function handleDeleteGear() {
@@ -1262,6 +1300,9 @@ const SEARCH_MIN_CHARS = 3;
 const searchCache = new Map();
 let searchDebounce = null;
 let searchSeq = 0;
+// Incremented when the user saves the gear modal — in-flight foreground
+// enrichment checks this to abort cleanly.
+let enrichmentSeq = 0;
 
 function resetGearSearchUI() {
   const input = $('#gear-search-input');
@@ -1354,40 +1395,43 @@ async function pickGearSuggestion(item) {
   applyExtracted(item);
   hideGearSuggestions();
   $('#gear-search-input').value = item.name || '';
+  const mySeq = ++enrichmentSeq;
   setPreviewLoading(true);
-  $('#gear-search-status').textContent = 'Fetching thumbnail…';
+  $('#gear-search-status').textContent = 'Fetching thumbnail… you can save anytime.';
 
   let merged = { ...item };
   try {
-    // 1) If the suggestion has a URL, use the URL-based pipeline —
-    //    it's the most reliable for og:image + weight.
     if (item.url) {
       try {
         const res = await callExtractGear({ url: item.url });
+        if (mySeq !== enrichmentSeq) return;
         if (res.data) {
           merged = { ...merged, ...res.data };
           applyExtracted(merged);
         }
       } catch (_) { /* fall through to identity */ }
     }
-    // 2) Always follow up with identity-based enrichment if we still
-    //    don't have a thumbnail — guarantees a web-search attempt.
+    if (mySeq !== enrichmentSeq) return;
     if (!$('#gear-image').value && item.name) {
       const res = await callExtractGear({
         identity: { name: item.name, brand: item.brand || null },
       });
+      if (mySeq !== enrichmentSeq) return;
       if (res.data) {
         merged = { ...merged, ...res.data };
         applyExtracted(merged);
       }
     }
+    if (mySeq !== enrichmentSeq) return;
     $('#gear-search-status').textContent = $('#gear-image').value
       ? ''
       : 'No thumbnail found — you can still save.';
   } catch (err) {
-    $('#gear-search-status').textContent = 'Couldn\u2019t enrich: ' + err.message;
+    if (mySeq === enrichmentSeq) {
+      $('#gear-search-status').textContent = 'Couldn\u2019t enrich: ' + err.message;
+    }
   } finally {
-    setPreviewLoading(false);
+    if (mySeq === enrichmentSeq) setPreviewLoading(false);
   }
 }
 
