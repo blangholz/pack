@@ -3,33 +3,110 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Pack — Shared gear & packing notes</title>
+  <title>Pack — Gear &amp; packing lists</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="wrap">
-    <header class="hdr">
+  <!-- Auth view -->
+  <section id="auth-view" class="auth-wrap" hidden>
+    <div class="auth-card">
       <h1>⛰ Pack</h1>
-      <p class="muted">Shared gear &amp; packing notes — anyone can read and post.</p>
+      <p class="muted">Enter your email — we'll send you a magic link to sign in.</p>
+      <form id="auth-form" class="auth-form">
+        <input
+          id="auth-email"
+          type="email"
+          autocomplete="email"
+          placeholder="you@example.com"
+          required
+        />
+        <button type="submit" id="auth-submit" class="btn btn-primary">Send magic link</button>
+      </form>
+      <p id="auth-status" class="status muted" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
+  <!-- Main (signed-in) view -->
+  <main id="main-view" class="wrap" hidden>
+    <header class="hdr">
+      <div class="hdr-left">
+        <h1>⛰ Pack</h1>
+      </div>
+      <div class="hdr-right">
+        <label class="unit-toggle">
+          Unit
+          <select id="unit-select">
+            <option value="g">g</option>
+            <option value="kg">kg</option>
+            <option value="oz">oz</option>
+            <option value="lb">lb</option>
+          </select>
+        </label>
+        <span id="user-email" class="muted"></span>
+        <button id="sign-out-btn" class="btn btn-ghost">Sign out</button>
+      </div>
     </header>
 
-    <form id="note-form" class="note-form">
-      <textarea
-        id="note-body"
-        placeholder="Post a note… e.g. 'Carabiners — 5 for climbing, 2 for highlining'"
-        rows="4"
-        required
-      ></textarea>
-      <div class="form-actions">
-        <div id="status" class="status muted" role="status" aria-live="polite"></div>
-        <button type="submit" id="submit-btn" class="btn btn-primary">Post note</button>
+    <div id="import-banner" class="import-banner" hidden>
+      <div>
+        <strong>Local data found.</strong>
+        <span id="import-summary" class="muted"></span>
       </div>
-    </form>
+      <div class="import-actions">
+        <button id="import-btn" class="btn btn-primary">Import to my account</button>
+        <button id="import-dismiss" class="btn btn-ghost">Dismiss</button>
+      </div>
+    </div>
 
-    <section class="notes">
-      <h2>Recent notes</h2>
-      <ul id="notes-list" class="notes-list" aria-live="polite"></ul>
-    </section>
+    <div class="layout">
+      <!-- Gear library -->
+      <section class="gear-panel">
+        <div class="panel-hdr">
+          <h2>Gear library</h2>
+          <button id="add-gear-toggle" class="btn btn-primary">+ Add gear</button>
+        </div>
+
+        <form id="add-gear-form" class="add-gear-form" hidden>
+          <input id="gear-name" type="text" placeholder="Name (required)" required />
+          <div class="row">
+            <input id="gear-weight" type="number" step="0.01" placeholder="Weight" />
+            <span id="gear-weight-unit" class="muted">g</span>
+            <input id="gear-quantity" type="number" min="0" step="1" value="1" />
+            <span class="muted">qty</span>
+          </div>
+          <input id="gear-brand" type="text" placeholder="Brand (optional)" />
+          <input id="gear-url" type="url" placeholder="Product URL (optional)" />
+          <input id="gear-image" type="url" placeholder="Image URL (optional)" />
+          <textarea id="gear-notes" rows="2" placeholder="Notes (optional)"></textarea>
+          <div class="row right">
+            <button type="button" id="gear-cancel" class="btn btn-ghost">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save gear</button>
+          </div>
+        </form>
+
+        <input id="gear-search" type="search" placeholder="Search gear…" class="gear-search" />
+        <ul id="gear-list" class="gear-list"></ul>
+      </section>
+
+      <!-- Activities -->
+      <section class="activity-panel">
+        <div class="activity-tabs" id="activity-tabs"></div>
+        <div class="activity-body">
+          <div class="panel-hdr">
+            <h2 id="activity-title">No activity</h2>
+            <div class="row">
+              <button id="reset-checklist" class="btn btn-ghost">Reset checked</button>
+              <button id="rename-activity" class="btn btn-ghost">Rename</button>
+              <button id="delete-activity" class="btn btn-ghost danger">Delete</button>
+            </div>
+          </div>
+          <ul id="activity-items" class="activity-items"></ul>
+          <div id="activity-footer" class="activity-footer muted"></div>
+        </div>
+      </section>
+    </div>
+
+    <p id="status" class="status muted" role="status" aria-live="polite"></p>
   </main>
 
   <script src="env.js"></script>
