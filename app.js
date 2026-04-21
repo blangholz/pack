@@ -1177,6 +1177,10 @@ function applyExtracted(data) {
     const v = gramsToUnit(data.weightGrams, displayUnit);
     $('#gear-weight').value = displayUnit === 'g' ? String(Math.round(v)) : v.toFixed(2);
   }
+  if (data.quantity != null && data.quantity > 1) {
+    const qtyEl = $('#gear-quantity');
+    if (!qtyEl.value || qtyEl.value === '1') qtyEl.value = String(data.quantity);
+  }
   updateGearPreview();
 }
 
