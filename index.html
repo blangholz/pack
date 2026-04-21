@@ -190,8 +190,19 @@
         </div>
         <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
 
-        <!-- Section 2: URL -->
-        <div class="section-label">② Or paste a product URL</div>
+        <!-- Section 2: Search -->
+        <div class="section-label">② Or search for a product</div>
+        <div class="field gear-search-field">
+          <div class="input-row gear-search-row">
+            <input id="gear-search-input" type="search" autocomplete="off" placeholder="e.g. Petzl Sama harness" />
+            <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
+          </div>
+          <div id="gear-search-suggestions" class="gear-search-suggestions hidden" role="listbox"></div>
+          <p id="gear-search-status" class="field-hint muted"></p>
+        </div>
+
+        <!-- Section 3: URL -->
+        <div class="section-label">③ Or paste a product URL</div>
         <div class="field">
           <div class="input-row">
             <input id="gear-url" type="url" placeholder="https://blackdiamondequipment.com/…" />
@@ -200,8 +211,8 @@
           <p id="fetch-status" class="field-hint muted"></p>
         </div>
 
-        <!-- Section 3: Manual -->
-        <div class="section-label">③ Or edit details manually</div>
+        <!-- Section 4: Manual -->
+        <div class="section-label">④ Or edit details manually</div>
         <div class="form-grid">
           <div class="field">
             <label for="gear-name">Name</label>
