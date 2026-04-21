@@ -318,13 +318,11 @@ input, textarea, select { font-family: inherit; }
 img.brand-badge-logo {
   display: inline-block;
   height: 20px;
-  width: auto;
-  max-width: 48px;
-  padding: 2px 4px;
-  box-sizing: border-box;
-  background: #ffffff;
-  border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  width: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   object-fit: contain;
   vertical-align: middle;
   /* hide alt text while the browser is loading / errored but before the
