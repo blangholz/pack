@@ -85,7 +85,13 @@ input, textarea, select { font-family: inherit; }
 }
 .auth-card h1 { font-size: 22px; }
 .auth-form { display: flex; flex-direction: column; gap: 10px; }
-.auth-form input[type="email"] {
+.auth-form label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: -4px;
+}
+.auth-form input[type="email"],
+.auth-form input[type="text"] {
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -94,10 +100,42 @@ input, textarea, select { font-family: inherit; }
   font-size: 14px;
   outline: none;
 }
-.auth-form input[type="email"]:focus { border-color: var(--accent); }
+.auth-form input[type="email"]:focus,
+.auth-form input[type="text"]:focus { border-color: var(--accent); }
 .auth-status { margin-top: 10px; text-align: center; }
 .auth-status.error { color: var(--danger); }
 .auth-status.ok { color: var(--success); }
+
+.auth-tagline { text-align: center; margin: 8px 0 16px; }
+.auth-cta { width: 100%; padding: 12px; font-size: 15px; }
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-subtitle { font-size: 18px; text-align: center; margin-top: 4px; }
+.auth-back {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 0;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+.auth-back:hover { color: var(--text); }
 
 /* ============ Status line ============ */
 .status {

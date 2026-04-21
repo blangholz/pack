@@ -14,19 +14,56 @@
         <span class="brand-mark">⛰</span>
         <h1>Pack</h1>
       </div>
-      <p class="muted" style="text-align: center; margin: 8px 0 16px;">
-        Enter your email — we'll send you a magic link to sign in.
-      </p>
-      <form id="auth-form" class="auth-form">
-        <input
-          id="auth-email"
-          type="email"
-          autocomplete="email"
-          placeholder="you@example.com"
-          required
-        />
-        <button type="submit" id="auth-submit" class="btn btn-primary">Send magic link</button>
-      </form>
+
+      <!-- Default: signup CTA + existing-user login -->
+      <div id="auth-chooser">
+        <p class="muted auth-tagline">Track your gear. Build packing lists for every adventure.</p>
+
+        <button type="button" id="show-signup-btn" class="btn btn-primary auth-cta">
+          Sign up as a new user
+        </button>
+
+        <div class="auth-divider"><span>Existing user? Log in</span></div>
+
+        <form id="signin-form" class="auth-form">
+          <input
+            id="signin-email"
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+            required
+          />
+          <button type="submit" id="signin-submit" class="btn btn-secondary">Send magic link</button>
+        </form>
+      </div>
+
+      <!-- Sign up form -->
+      <div id="auth-signup" hidden>
+        <button type="button" id="signup-back-btn" class="btn-link auth-back">← Back</button>
+        <h2 class="auth-subtitle">Create your account</h2>
+        <p class="muted auth-tagline">We'll email you a magic link to finish signing up.</p>
+
+        <form id="signup-form" class="auth-form">
+          <label for="signup-name">Name</label>
+          <input
+            id="signup-name"
+            type="text"
+            autocomplete="name"
+            placeholder="Your name"
+            required
+          />
+          <label for="signup-email">Email</label>
+          <input
+            id="signup-email"
+            type="email"
+            autocomplete="email"
+            placeholder="you@example.com"
+            required
+          />
+          <button type="submit" id="signup-submit" class="btn btn-primary">Create account</button>
+        </form>
+      </div>
+
       <p id="auth-status" class="auth-status muted" role="status" aria-live="polite"></p>
     </div>
   </section>

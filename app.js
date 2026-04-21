@@ -1375,19 +1375,59 @@ function wire() {
   });
   $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
 
-  // Auth form
-  $('#auth-form').addEventListener('submit', async (e) => {
+  // Auth: toggle between chooser and signup form
+  $('#show-signup-btn').addEventListener('click', () => {
+    $('#auth-chooser').hidden = true;
+    $('#auth-signup').hidden = false;
+    setAuthStatus('');
+    setTimeout(() => $('#signup-name').focus(), 0);
+  });
+  $('#signup-back-btn').addEventListener('click', () => {
+    $('#auth-signup').hidden = true;
+    $('#auth-chooser').hidden = false;
+    setAuthStatus('');
+  });
+
+  // Sign up form (new user) — collects name + email, sends magic link
+  $('#signup-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = $('#auth-email').value.trim();
+    const name = $('#signup-name').value.trim();
+    const email = $('#signup-email').value.trim();
+    if (!name || !email) return;
+    $('#signup-submit').disabled = true;
+    setAuthStatus('Creating your account…');
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+        shouldCreateUser: true,
+        data: { full_name: name },
+      },
+    });
+    $('#signup-submit').disabled = false;
+    if (error) { setAuthStatus(`Could not send: ${error.message}`, 'error'); return; }
+    setAuthStatus(`Check ${email} — click the link to finish signing up. You can close this tab.`, 'ok');
+  });
+
+  // Sign in form (existing user) — email only, magic link
+  $('#signin-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = $('#signin-email').value.trim();
     if (!email) return;
-    $('#auth-submit').disabled = true;
+    $('#signin-submit').disabled = true;
     setAuthStatus('Sending magic link…');
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin, shouldCreateUser: true },
+      options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
     });
-    $('#auth-submit').disabled = false;
-    if (error) { setAuthStatus(`Could not send: ${error.message}`, 'error'); return; }
+    $('#signin-submit').disabled = false;
+    if (error) {
+      const msg = /signups not allowed|user not found|not_found/i.test(error.message)
+        ? `No account for ${email}. Try "Sign up as a new user" above.`
+        : `Could not send: ${error.message}`;
+      setAuthStatus(msg, 'error');
+      return;
+    }
     setAuthStatus(`Check ${email} — click the link to sign in. You can close this tab.`, 'ok');
   });
 
@@ -1531,10 +1571,26 @@ function wire() {
 // ------------------------------------------------------------------
 // Auth state + boot
 // ------------------------------------------------------------------
+async function syncDisplayName(user) {
+  const fullName = user?.user_metadata?.full_name;
+  if (!fullName) return;
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('display_name')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (profile?.display_name) return;
+  await supabase
+    .from('profiles')
+    .upsert({ id: user.id, display_name: fullName }, { onConflict: 'id' });
+}
+
+
 async function onSignedIn(session) {
   currentUser = session.user;
   $('#user-email').textContent = currentUser.email || '';
   showMain();
+  await syncDisplayName(currentUser);
   await loadAll();
   // Seed default activities on first login
   if (!activities.length) {
