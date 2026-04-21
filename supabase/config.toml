@@ -237,7 +237,7 @@ port = 465
 user = "resend"
 pass = "env(RESEND_API_KEY)"
 admin_email = "auth@packup.equipment"
-sender_name = "Pack"
+sender_name = "PackUp"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
@@ -250,7 +250,7 @@ sender_name = "Pack"
 # prefetch the link and consume the single-use token before the real user
 # clicks it.
 [auth.email.template.magic_link]
-subject = "Your Pack sign-in link"
+subject = "Your PackUp sign-in link"
 content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
