@@ -2445,6 +2445,21 @@ img.brand-badge-logo {
   margin-bottom: 8px;
 }
 
+/* Export + print buttons inside share modal */
+.share-export-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.share-export-row .share-export-btn {
+  flex: 1;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 /* Invite form inside share modal */
 .share-invite-form {
   display: flex;
@@ -2838,6 +2853,7 @@ img.brand-badge-logo {
   .share-invite-form { flex-direction: column; gap: 8px; }
   .share-invite-form .btn { width: 100%; min-height: 44px; }
   .share-invite-form input[type="email"] { font-size: 16px; min-height: 44px; }
+  .share-export-row .share-export-btn { min-height: 44px; font-size: 14px; }
   .share-member-row,
   .share-invite-row {
     padding: 10px 12px;

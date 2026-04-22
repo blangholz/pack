@@ -725,6 +725,27 @@
         </div>
 
         <div class="share-section">
+          <div class="share-section-label">Export or print</div>
+          <div class="share-export-row">
+            <button
+              id="share-print-btn"
+              class="btn btn-ghost share-export-btn"
+              type="button"
+            >
+              <span aria-hidden="true">🖨️</span> Print
+            </button>
+            <button
+              id="share-csv-btn"
+              class="btn btn-ghost share-export-btn"
+              type="button"
+            >
+              <span aria-hidden="true">📊</span> Export CSV
+            </button>
+          </div>
+          <p class="field-hint muted">Paper-friendly printout, or a spreadsheet for Excel, Numbers, or Sheets.</p>
+        </div>
+
+        <div class="share-section">
           <div class="share-section-label">Or invite by email</div>
           <form id="share-invite-form" class="share-invite-form" autocomplete="off">
             <input id="share-invite-email" type="email" inputmode="email" autocomplete="email" placeholder="friend@example.com" required />

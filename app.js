@@ -3466,6 +3466,374 @@ async function handleLeaveActivity() {
   toast(`Left "${a.name}"`);
 }
 
+// ---- Share modal: print + CSV export -------------------------------------
+
+// Build a structured snapshot of the active list suitable for rendering to
+// paper or serializing to CSV. Shared by both the print and the CSV paths so
+// they stay in sync (same column order, same labels, same totals).
+function buildExportContext(activityId) {
+  const activity = activities.find((a) => a.id === activityId);
+  if (!activity) return null;
+  const items = itemsFor(activityId);
+  const customFilters = customFiltersFor(activityId);
+  const members = [...membersFor(activityId)].sort((a, b) => {
+    if (a.role === 'owner' && b.role !== 'owner') return -1;
+    if (b.role === 'owner' && a.role !== 'owner') return 1;
+    return (a.joined_at || '').localeCompare(b.joined_at || '');
+  });
+
+  const rows = [];
+  let totalGrams = 0;
+  let knownWeightCount = 0;
+  let packedCount = 0;
+  for (const item of items) {
+    const gear = getGearById(item.gear_id);
+    if (!gear) continue;
+    const qty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
+    const unitGrams = (gear.weight_grams == null) ? null : Number(gear.weight_grams);
+    const rowTotalGrams = unitGrams == null ? null : unitGrams * qty;
+    if (rowTotalGrams != null) { totalGrams += rowTotalGrams; knownWeightCount++; }
+    if (item.packed) packedCount++;
+
+    const weatherLabels = (item.weather_tags || [])
+      .map((id) => WEATHER_TYPES.find((w) => w.id === id)?.label)
+      .filter(Boolean);
+    const categoryLabels = (item.custom_filter_ids || [])
+      .map((id) => customFilters.find((f) => f.id === id)?.label)
+      .filter(Boolean);
+
+    rows.push({
+      packed: !!item.packed,
+      name: gear.name || 'Unnamed',
+      brand: gear.brand || '',
+      quantity: qty,
+      unitGrams,
+      totalGrams: rowTotalGrams,
+      weather: weatherLabels,
+      categories: categoryLabels,
+      note: item.note || '',
+      url: gear.url || '',
+    });
+  }
+
+  return {
+    activity,
+    items: rows,
+    members: members.map((m) =>
+      displayNameFor(m.user_id) || (m.user_id === currentUser?.id ? 'You' : 'Member')),
+    itemCount: rows.length,
+    packedCount,
+    totalGrams,
+    hasAnyWeight: knownWeightCount > 0,
+    unit: displayUnit,
+    exportedAt: new Date(),
+  };
+}
+
+// Safe filename stem from a list name. Keeps letters/numbers/dashes; collapses
+// anything else to a single hyphen; trims leading/trailing hyphens.
+function sanitizeFilename(name) {
+  return (name || 'packing-list')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'packing-list';
+}
+
+// Short ISO date (YYYY-MM-DD) in the user's local timezone, for filenames.
+function isoDateLocal(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// Print the active packing list: open a new window with a self-contained
+// styled HTML document, then auto-trigger the browser print dialog. We use a
+// new window (not @media print on the live app) because the app DOM is dense
+// with interactive chrome that doesn't translate to paper — a fresh document
+// lets us render a clean, table-first layout with exactly the columns a
+// printed checklist should have.
+function handleSharePrint() {
+  const ctx = buildExportContext(shareModalActivityId);
+  if (!ctx) return;
+  const html = buildPrintDocument(ctx);
+  const w = window.open('', '_blank');
+  if (!w) {
+    toast('Pop-up blocked. Allow pop-ups to print this list.', 'error');
+    return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Some browsers need a tick after close() before print() will fire reliably.
+  w.onload = () => {
+    try { w.focus(); w.print(); } catch (_) { /* user can still print manually */ }
+  };
+}
+
+function buildPrintDocument(ctx) {
+  const { activity, items, members, itemCount, packedCount, totalGrams, hasAnyWeight, unit, exportedAt } = ctx;
+  const title = `${activity.emoji ? activity.emoji + ' ' : ''}${activity.name || 'Packing list'}`;
+  const dateStr = exportedAt.toLocaleDateString(undefined,
+    { year: 'numeric', month: 'long', day: 'numeric' });
+  const totalStr = hasAnyWeight ? formatWeight(totalGrams, unit) : '—';
+
+  const rowsHtml = items.map((r) => {
+    const unitW = r.unitGrams == null ? '—' : formatWeight(r.unitGrams, unit);
+    const totalW = r.totalGrams == null ? '—' : formatWeight(r.totalGrams, unit);
+    const tags = [...r.weather, ...r.categories];
+    const tagsHtml = tags.length
+      ? `<div class="tags">${tags.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>`
+      : '';
+    const noteHtml = r.note
+      ? `<div class="note">${escapeHtml(r.note)}</div>`
+      : '';
+    return `
+      <tr class="${r.packed ? 'packed' : ''}">
+        <td class="cb"><span class="checkbox">${r.packed ? '✓' : ''}</span></td>
+        <td class="item">
+          <div class="item-name">${escapeHtml(r.name)}</div>
+          ${r.brand ? `<div class="item-brand">${escapeHtml(r.brand)}</div>` : ''}
+          ${tagsHtml}
+          ${noteHtml}
+        </td>
+        <td class="qty">${r.quantity > 1 ? '×' + r.quantity : ''}</td>
+        <td class="w">${escapeHtml(unitW)}</td>
+        <td class="w total">${escapeHtml(totalW)}</td>
+      </tr>`;
+  }).join('');
+
+  const emptyHtml = items.length ? '' : `
+    <tr><td colspan="5" class="empty">This list has no items yet.</td></tr>`;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(activity.name || 'Packing list')}</title>
+<style>
+  @page { size: letter; margin: 0.6in; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font: 12pt/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #111;
+    background: #fff;
+    padding: 24px;
+  }
+  .hdr { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 14px; }
+  .hdr h1 {
+    margin: 0 0 4px 0;
+    font-size: 22pt;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    color: #444;
+    font-size: 10.5pt;
+  }
+  .meta span b { color: #111; font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  thead th {
+    text-align: left;
+    font-size: 9pt;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #555;
+    border-bottom: 1px solid #999;
+    padding: 6px 8px;
+  }
+  tbody td {
+    border-bottom: 1px solid #e0e0e0;
+    padding: 8px;
+    vertical-align: top;
+  }
+  .cb { width: 26px; }
+  .checkbox {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 1.5px solid #111;
+    border-radius: 3px;
+    text-align: center;
+    line-height: 14px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  tr.packed .checkbox { background: #111; color: #fff; }
+  tr.packed .item-name { text-decoration: line-through; color: #555; }
+  .qty { width: 50px; color: #333; }
+  .w { width: 80px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .w.total { font-weight: 600; }
+  thead th.w { text-align: right; }
+  .item-name { font-weight: 600; font-size: 11.5pt; }
+  .item-brand { font-size: 9.5pt; color: #666; margin-top: 1px; }
+  .tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag {
+    display: inline-block;
+    font-size: 8.5pt;
+    padding: 1px 6px;
+    border: 1px solid #bbb;
+    border-radius: 999px;
+    color: #444;
+  }
+  .note { margin-top: 3px; font-size: 10pt; color: #333; font-style: italic; }
+  tfoot td {
+    padding-top: 10px;
+    font-weight: 700;
+    border-top: 2px solid #111;
+  }
+  tfoot .total-label { text-align: right; }
+  tfoot .total-val { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: #777; font-style: italic; padding: 18px 8px !important; text-align: center; }
+  .footer-note {
+    margin-top: 18px;
+    font-size: 9pt;
+    color: #777;
+    text-align: right;
+  }
+  @media print {
+    body { padding: 0; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <header class="hdr">
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">
+      <span><b>${itemCount}</b> item${itemCount === 1 ? '' : 's'}</span>
+      <span><b>${packedCount}</b> packed</span>
+      <span><b>Total weight:</b> ${escapeHtml(totalStr)}</span>
+      ${members.length ? `<span><b>Packed by:</b> ${escapeHtml(members.join(', '))}</span>` : ''}
+      <span>${escapeHtml(dateStr)}</span>
+    </div>
+  </header>
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>Item</th>
+        <th>Qty</th>
+        <th class="w">Each</th>
+        <th class="w">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+      ${emptyHtml}
+    </tbody>
+    ${items.length && hasAnyWeight ? `
+    <tfoot>
+      <tr>
+        <td></td>
+        <td colspan="3" class="total-label">Pack total</td>
+        <td class="total-val">${escapeHtml(formatWeight(totalGrams, unit))}</td>
+      </tr>
+    </tfoot>` : ''}
+  </table>
+  <div class="footer-note">Generated by PackUpGear · ${escapeHtml(dateStr)}</div>
+</body>
+</html>`;
+}
+
+// Export the active list as a UTF-8 CSV with a metadata preamble at the top
+// (list name, members, totals, export date), a blank separator row, then the
+// canonical column header row + one data row per item. The BOM ensures Excel
+// opens UTF-8 cleanly instead of mangling emoji / accented names.
+function handleShareExportCsv() {
+  const ctx = buildExportContext(shareModalActivityId);
+  if (!ctx) return;
+  const csv = buildCsvContent(ctx);
+  const stem = sanitizeFilename(ctx.activity.name);
+  const filename = `${stem}-${isoDateLocal(ctx.exportedAt)}.csv`;
+  downloadTextFile(filename, csv, 'text/csv;charset=utf-8');
+}
+
+function buildCsvContent(ctx) {
+  const { activity, items, members, itemCount, packedCount, totalGrams, hasAnyWeight, unit, exportedAt } = ctx;
+  const unitHeader = unit.toUpperCase();
+  const totalStr = hasAnyWeight ? formatWeight(totalGrams, unit) : '';
+  const exportedStr = exportedAt.toLocaleString();
+
+  const meta = [
+    ['Packing List', `${activity.emoji ? activity.emoji + ' ' : ''}${activity.name || ''}`],
+    ['Members', members.join(', ')],
+    ['Item count', String(itemCount)],
+    ['Packed', `${packedCount} of ${itemCount}`],
+    ['Total weight', totalStr],
+    ['Weight unit', unit],
+    ['Exported', exportedStr],
+  ];
+
+  const header = [
+    'Packed',
+    'Item',
+    'Brand',
+    'Quantity',
+    `Weight each (${unitHeader})`,
+    `Weight total (${unitHeader})`,
+    'Weather',
+    'Categories',
+    'Note',
+    'URL',
+  ];
+
+  const gramsToUnitVal = (g) => {
+    if (g == null) return '';
+    const v = gramsToUnit(g, unit);
+    const decimals = (unit === 'g') ? 0 : (unit === 'kg' || unit === 'lb') ? 2 : 1;
+    return v.toFixed(decimals);
+  };
+
+  const dataRows = items.map((r) => [
+    r.packed ? 'Y' : 'N',
+    r.name,
+    r.brand,
+    String(r.quantity),
+    gramsToUnitVal(r.unitGrams),
+    gramsToUnitVal(r.totalGrams),
+    r.weather.join(', '),
+    r.categories.join(', '),
+    r.note,
+    r.url,
+  ]);
+
+  const lines = [
+    ...meta.map(csvRow),
+    '',
+    csvRow(header),
+    ...dataRows.map(csvRow),
+  ];
+  // UTF-8 BOM for Excel; \r\n line endings for broadest spreadsheet compat.
+  return '\uFEFF' + lines.join('\r\n') + '\r\n';
+}
+
+function csvRow(cells) {
+  return cells.map(csvCell).join(',');
+}
+function csvCell(value) {
+  const s = value == null ? '' : String(value);
+  if (/[",\r\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+  return s;
+}
+
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke after the click has had a chance to dispatch; iOS in particular
+  // can be flaky if the URL is revoked too quickly.
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 // ---- New-activity invite fan-out -----------------------------------------
 
 // After a new activity is created, if the creator typed emails in the
@@ -4843,6 +5211,8 @@ function wire() {
   // Share modal
   $('#share-invite-form').addEventListener('submit', handleShareInviteSubmit);
   $('#share-leave-btn').addEventListener('click', handleLeaveActivity);
+  $('#share-print-btn').addEventListener('click', handleSharePrint);
+  $('#share-csv-btn').addEventListener('click', handleShareExportCsv);
 
   // Gear modal
   $('#fetch-details-btn').addEventListener('click', () => {
