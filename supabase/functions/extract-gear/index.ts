@@ -7,12 +7,16 @@
 //
 // Response body (JSON): { name, brand, weightGrams, url, imageUrl, notes }
 //
-// Auth: relies on the Supabase gateway verifying the caller's JWT
-// (set verify_jwt = true in supabase/config.toml so only signed-in users hit it).
+// Auth: the Supabase gateway can't verify this project's ES256 JWTs, so
+// verify_jwt is off in config.toml. We instead call the Supabase auth API
+// from inside the function (see requireUser) to ensure only signed-in users
+// can burn our Anthropic spend.
 
 // deno-lint-ignore-file no-explicit-any
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const MODEL = "claude-haiku-4-5-20251001";
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
@@ -25,6 +29,24 @@ function json(body: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json", ...CORS_HEADERS },
   });
+}
+
+// Validate the caller's access token against Supabase auth. Returns the user
+// id on success, or null if the token is missing/invalid/expired.
+async function requireUser(req: Request): Promise<string | null> {
+  const auth = req.headers.get("authorization") || "";
+  const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
+    });
+    if (!res.ok) return null;
+    const user = await res.json();
+    return typeof user?.id === "string" ? user.id : null;
+  } catch {
+    return null;
+  }
 }
 
 const EXTRACTION_SCHEMA = `Return ONLY a JSON object — no markdown fences, no prose. Use null when unknown:
@@ -40,7 +62,9 @@ const EXTRACTION_SCHEMA = `Return ONLY a JSON object — no markdown fences, no 
 
 Once you've identified the product, use your general knowledge about that specific product to fill in fields that may not be directly visible (weight from specs, the manufacturer's product URL, the main product image URL). Only include values you are reasonably confident about — leave anything uncertain as null.`;
 
-async function callClaude(messages: any[], maxTokens = 800) {
+async function callClaude(messages: any[], maxTokens = 800, tools?: any[]) {
+  const body: Record<string, unknown> = { model: MODEL, max_tokens: maxTokens, messages };
+  if (tools && tools.length) body.tools = tools;
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -48,7 +72,7 @@ async function callClaude(messages: any[], maxTokens = 800) {
       "x-api-key": ANTHROPIC_API_KEY!,
       "anthropic-version": "2023-06-01",
     },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -81,6 +105,31 @@ function normalize(raw: Record<string, any>, fallbackUrl: string | null) {
   };
 }
 
+// Verify that an image URL actually resolves to an image. Claude sometimes
+// guesses plausible-but-wrong CDN URLs; without this check we persist a
+// broken image URL and the UI shows a blank thumbnail.
+async function verifyImageUrl(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+        "accept": "image/*",
+        "range": "bytes=0-1023",
+      },
+    });
+    if (!res.ok && res.status !== 206) return false;
+    const ct = res.headers.get("content-type") || "";
+    // drain body to release the connection
+    try { await res.arrayBuffer(); } catch { /* ignore */ }
+    return ct.startsWith("image/");
+  } catch {
+    return false;
+  }
+}
+
 async function fetchHtml(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -95,6 +144,50 @@ async function fetchHtml(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// Many outdoor-gear sites don't expose og:image but do embed a schema.org
+// Product block with an image field. Checking this recovers a lot of cases.
+function extractJsonLdImage(html: string, baseUrl: string): string | null {
+  const blocks = html.matchAll(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  );
+  for (const m of blocks) {
+    let parsed: any;
+    try { parsed = JSON.parse(m[1].trim()); } catch { continue; }
+    const stack = Array.isArray(parsed) ? [...parsed] : [parsed];
+    while (stack.length) {
+      const node = stack.shift();
+      if (!node || typeof node !== "object") continue;
+      if (Array.isArray(node["@graph"])) stack.push(...node["@graph"]);
+      const t = node["@type"];
+      const isProduct = t === "Product" || (Array.isArray(t) && t.includes("Product"));
+      if (!isProduct) continue;
+      const img = node.image;
+      let url: string | null = null;
+      if (typeof img === "string") url = img;
+      else if (Array.isArray(img) && img.length) {
+        url = typeof img[0] === "string" ? img[0] : (img[0]?.url ?? null);
+      } else if (img && typeof img === "object" && typeof img.url === "string") {
+        url = img.url;
+      }
+      if (url) {
+        try { return new URL(url, baseUrl).toString(); } catch { return url; }
+      }
+    }
+  }
+  return null;
+}
+
+// Magento stores (La Sportiva, Scarpa, several climbing brands) don't emit
+// og:image or JSON-LD Product. They embed the gallery as a JSON blob in the
+// HTML with "img":"https://…" entries. Grab the first one.
+function extractMagentoGalleryImage(html: string, baseUrl: string): string | null {
+  const m = html.match(/"img"\s*:\s*"(https?:\\?\/\\?\/[^"]+?\.(?:jpg|jpeg|png|webp)(?:\?[^"]*)?)"/i);
+  if (!m?.[1]) return null;
+  const unescaped = m[1].replace(/\\\//g, "/");
+  try { return new URL(unescaped, baseUrl).toString(); }
+  catch { return unescaped; }
 }
 
 function extractOgImage(html: string, baseUrl: string): string | null {
@@ -113,7 +206,7 @@ function extractOgImage(html: string, baseUrl: string): string | null {
       }
     }
   }
-  return null;
+  return extractJsonLdImage(html, baseUrl) || extractMagentoGalleryImage(html, baseUrl);
 }
 
 async function claudeExtractFromHtml(url: string, html: string) {
@@ -166,6 +259,119 @@ async function enrichByIdentity(name: string, brand: string | null) {
   }
 }
 
+// Autocomplete-style product search. Uses Claude + web_search to list up
+// to 5 matching products for the user's query. We keep this cheap: no
+// per-result image verification (happens on select), no og:image fetch.
+async function searchProducts(query: string) {
+  const prompt = [
+    `You are an outdoor-gear product search. The user is typing a query into a search box.`,
+    ``,
+    `Query: "${query}"`,
+    ``,
+    `Use the web_search tool to find up to 5 specific products that match. Each result should be a concrete product (not a category or review).`,
+    ``,
+    `Return ONLY a JSON object — no markdown, no prose:`,
+    `{`,
+    `  "suggestions": [`,
+    `    {`,
+    `      "name": string (concise product name, no pack-size suffix),`,
+    `      "brand": string|null,`,
+    `      "weightGrams": number|null (single-unit weight in grams if you know it),`,
+    `      "quantity": number|null (pack size if multi-pack, else 1),`,
+    `      "url": string|null (manufacturer product page when possible, else reputable retailer),`,
+    `      "imageUrl": string|null (direct image URL from the product page),`,
+    `      "notes": string|null (1 short sentence: key spec)`,
+    `    }`,
+    `  ]`,
+    `}`,
+    ``,
+    `Order results by best match first. If the query is too vague to suggest specific products, return an empty array.`,
+  ].join("\n");
+  const text = await callClaude(
+    [{ role: "user", content: prompt }],
+    4000,
+    [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+  );
+  let raw: Record<string, any>;
+  try {
+    raw = coerceJson(text);
+  } catch (e) {
+    throw new Error(`search: could not parse model output: ${text.slice(0, 200)}`);
+  }
+  const items = Array.isArray(raw.suggestions) ? raw.suggestions : [];
+  return items.slice(0, 5).map((r: any) => normalize(r, null));
+}
+
+// Use Claude's web_search tool to find a product page URL when we don't have one
+// (or the one we have doesn't resolve). The caller then fetches the page for og:image.
+async function searchWebForProductUrl(name: string, brand: string | null): Promise<string | null> {
+  const query = brand ? `${brand} ${name}` : name;
+  const prompt = [
+    `Search the web to find the product page for this outdoor-gear item:`,
+    ``,
+    `Product: ${query}`,
+    ``,
+    `Prefer the manufacturer's own site; otherwise a reputable retailer (REI, Backcountry, MEC, Moosejaw).`,
+    `The page must be an actual product/detail page — not a category, review, or blog post.`,
+    ``,
+    `Return ONLY a JSON object, no markdown or prose:`,
+    `{ "url": string|null }`,
+  ].join("\n");
+  try {
+    const text = await callClaude(
+      [{ role: "user", content: prompt }],
+      1500,
+      [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+    );
+    const raw = coerceJson(text);
+    const v = raw.url;
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Enrich a known product (by name + optional brand) with a verified thumbnail,
+// a manufacturer URL, and a weight guess. Used after the user picks a search
+// suggestion — guarantees at least one web-search attempt for an image.
+async function extractFromIdentity(name: string, brand: string | null) {
+  const enriched = await enrichByIdentity(name, brand);
+  let imageUrl: string | null = enriched.imageUrl;
+  let url: string | null = enriched.url;
+
+  if (imageUrl && !(await verifyImageUrl(imageUrl))) imageUrl = null;
+
+  if (!imageUrl && url) {
+    const html = await fetchHtml(url);
+    if (html) {
+      const og = extractOgImage(html, url);
+      if (og && (await verifyImageUrl(og))) imageUrl = og;
+    }
+  }
+
+  if (!imageUrl) {
+    const searchedUrl = await searchWebForProductUrl(name, brand);
+    if (searchedUrl) {
+      url = url || searchedUrl;
+      const html = await fetchHtml(searchedUrl);
+      if (html) {
+        const og = extractOgImage(html, searchedUrl);
+        if (og && (await verifyImageUrl(og))) imageUrl = og;
+      }
+    }
+  }
+
+  return {
+    name,
+    brand,
+    weightGrams: enriched.weightGrams,
+    quantity: null,
+    url,
+    imageUrl,
+    notes: null,
+  };
+}
+
 async function extractFromUrl(url: string) {
   const html = (await fetchHtml(url)) || "";
   const data = await claudeExtractFromHtml(url, html);
@@ -173,6 +379,17 @@ async function extractFromUrl(url: string) {
   if (html) {
     const og = extractOgImage(html, url);
     if (og) data.imageUrl = og;
+  }
+  if (data.imageUrl && !(await verifyImageUrl(data.imageUrl))) data.imageUrl = null;
+  if (!data.imageUrl && data.name) {
+    const searchedUrl = await searchWebForProductUrl(data.name, data.brand);
+    if (searchedUrl) {
+      const h = await fetchHtml(searchedUrl);
+      if (h) {
+        const og = extractOgImage(h, searchedUrl);
+        if (og && (await verifyImageUrl(og))) data.imageUrl = og;
+      }
+    }
   }
   return data;
 }
@@ -218,14 +435,33 @@ async function extractFromImage(image: { base64: string; mediaType: string }) {
   }
 
   // Step 3: if we ended up with a URL, try to fetch it. If it responds,
-  // prefer its og:image for the thumbnail. If it 404s, drop the URL +
-  // imageUrl came from Claude's guess (likely unreliable) — but keep
-  // the URL field if Claude returned it directly from the screenshot.
+  // prefer its og:image for the thumbnail.
   if (data.url) {
     const html = await fetchHtml(data.url);
     if (html) {
       const og = extractOgImage(html, data.url);
       if (og) data.imageUrl = og;
+    }
+  }
+
+  // Step 3b: verify the image URL actually resolves — Claude sometimes
+  // hallucinates plausible-looking CDN URLs that don't exist. If bad, drop
+  // it so the web-search fallback below has a chance to fix it.
+  if (data.imageUrl && !(await verifyImageUrl(data.imageUrl))) data.imageUrl = null;
+
+  // Step 4: still no thumbnail? Have Claude web-search for a product page
+  // (any reputable site — manufacturer, REI, Backcountry, etc.) and pull
+  // its og:image. The image doesn't need to come from the same site as the
+  // original screenshot — just needs to be the same product.
+  if (!data.imageUrl && data.name) {
+    const searchedUrl = await searchWebForProductUrl(data.name, data.brand);
+    if (searchedUrl) {
+      if (!data.url) data.url = searchedUrl;
+      const html = await fetchHtml(searchedUrl);
+      if (html) {
+        const og = extractOgImage(html, searchedUrl);
+        if (og && (await verifyImageUrl(og))) data.imageUrl = og;
+      }
     }
   }
 
@@ -237,6 +473,9 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   if (!ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY not configured" }, 500);
 
+  const userId = await requireUser(req);
+  if (!userId) return json({ error: "Unauthorized" }, 401);
+
   let body: any;
   try {
     body = await req.json();
@@ -245,6 +484,18 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (typeof body?.query === "string" && body.query.trim().length >= 3) {
+      const suggestions = await searchProducts(body.query.trim());
+      return json({ suggestions });
+    }
+    if (body?.identity && typeof body.identity.name === "string" && body.identity.name.trim()) {
+      const name = body.identity.name.trim();
+      const brand = typeof body.identity.brand === "string" && body.identity.brand.trim()
+        ? body.identity.brand.trim()
+        : null;
+      const data = await extractFromIdentity(name, brand);
+      return json({ data });
+    }
     if (typeof body?.url === "string" && body.url.trim()) {
       const data = await extractFromUrl(body.url.trim());
       return json({ data });
@@ -253,7 +504,7 @@ Deno.serve(async (req) => {
       const data = await extractFromImage(body.image);
       return json({ data });
     }
-    return json({ error: "Provide either { url } or { image: { base64, mediaType } }" }, 400);
+    return json({ error: "Provide { query }, { url }, or { image: { base64, mediaType } }" }, 400);
   } catch (err) {
     return json({ error: (err as Error).message || "Extraction failed" }, 500);
   }
