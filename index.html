@@ -10,11 +10,20 @@
 <body>
   <!-- Auth view -->
   <section id="auth-view" class="auth-wrap" hidden>
+    <div class="auth-decor" aria-hidden="true">
+      <span class="auth-decor-item" style="top:10%;  left:8%;  font-size:56px;">🏔</span>
+      <span class="auth-decor-item" style="top:22%;  right:10%; font-size:44px;">🪂</span>
+      <span class="auth-decor-item" style="top:44%;  left:5%;  font-size:34px;">🎒</span>
+      <span class="auth-decor-item" style="top:60%;  right:6%; font-size:38px;">🪢</span>
+      <span class="auth-decor-item" style="bottom:14%; left:14%; font-size:46px;">🧗</span>
+      <span class="auth-decor-item" style="bottom:8%;  right:10%; font-size:50px;">⛺</span>
+    </div>
     <div class="auth-card">
       <div class="brand" style="justify-content: center;">
         <span class="brand-mark">⛰</span>
         <h1>PackUp</h1>
       </div>
+      <p class="auth-hero">Gear up. Get out.</p>
 
       <!-- Default: signup CTA + existing-user login -->
       <div id="auth-chooser">
@@ -180,6 +189,25 @@
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <!-- ========== MODALS ========== -->
+
+  <!-- Activity Picker (mobile per-card "+" → choose which list) -->
+  <div id="activity-picker" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="activity-picker-title">
+    <div class="modal-backdrop" data-close="activity-picker"></div>
+    <div class="modal-panel activity-picker-panel">
+      <header class="modal-header">
+        <h3 id="activity-picker-title">Add to packing list</h3>
+        <button class="icon-btn" data-close="activity-picker" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <p id="activity-picker-gear" class="muted activity-picker-gear"></p>
+        <div id="activity-picker-list" class="activity-picker-list"></div>
+        <button id="activity-picker-new" class="activity-picker-new" type="button">
+          <span class="apn-icon">＋</span>
+          <span>New packing list</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Add / Edit Gear Modal -->
   <div id="gear-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="gear-modal-title">

@@ -73,8 +73,44 @@ input, textarea, select { font-family: inherit; }
   align-items: center;
   justify-content: center;
   padding: 20px;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 60% 50% at 28% 22%, rgba(139, 157, 255, 0.16), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 78% 82%, rgba(74, 222, 128, 0.10), transparent 60%),
+    radial-gradient(ellipse 80% 70% at 50% 110%, rgba(251, 191, 36, 0.06), transparent 70%),
+    var(--bg);
 }
+.auth-decor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.auth-decor-item {
+  position: absolute;
+  opacity: 0.14;
+  user-select: none;
+  filter: grayscale(0.2);
+  animation: auth-drift 16s ease-in-out infinite alternate;
+  will-change: transform;
+}
+.auth-decor-item:nth-child(2) { animation-duration: 19s; animation-delay: -2s; }
+.auth-decor-item:nth-child(3) { animation-duration: 14s; animation-delay: -4s; }
+.auth-decor-item:nth-child(4) { animation-duration: 21s; animation-delay: -1s; }
+.auth-decor-item:nth-child(5) { animation-duration: 17s; animation-delay: -6s; }
+.auth-decor-item:nth-child(6) { animation-duration: 23s; animation-delay: -3s; }
+@keyframes auth-drift {
+  0%   { transform: translate(0, 0)      rotate(-3deg); }
+  100% { transform: translate(10px, -12px) rotate(3deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-decor-item { animation: none; }
+}
+
 .auth-card {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 380px;
   background: var(--bg-elev);
@@ -82,8 +118,17 @@ input, textarea, select { font-family: inherit; }
   border-radius: 14px;
   padding: 28px 24px;
   box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
 }
 .auth-card h1 { font-size: 22px; }
+.auth-hero {
+  margin: 14px 0 4px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
 .auth-form { display: flex; flex-direction: column; gap: 10px; }
 .auth-form label {
   font-size: 12px;
