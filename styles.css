@@ -2631,3 +2631,203 @@ img.brand-badge-logo {
 /* Hide the invite-count badge until someone is actually there — prevents a
    lone inviter from seeing "1" on their own list. */
 .share-activity-count:empty { display: none; }
+
+/* ------------------------------------------------------------------
+   Share-link landing view (?share=<token> for not-signed-in users).
+   Mirrors the #auth-view brand + hero treatment; the middle card is
+   the invitation preview, the lower card is the sign-up/sign-in form.
+   ------------------------------------------------------------------ */
+.invite-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 380px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  margin: 4px 0 10px;
+}
+.invite-kicker {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.invite-kicker #share-landing-inviter { color: var(--text); font-weight: 600; }
+.invite-activity {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.invite-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.invite-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  min-height: 44px;
+}
+.invite-preview-row .invite-preview-img {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.invite-preview-row .invite-preview-img-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--text-muted);
+  object-fit: unset;
+}
+.invite-preview-row .invite-preview-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.invite-preview-row .invite-preview-name {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invite-preview-row .invite-preview-brand {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.invite-more {
+  margin: 10px 0 0 0;
+  font-size: 12px;
+}
+.invite-invalid { text-align: left; }
+.invite-invalid p { margin: 0 0 6px 0; font-size: 13px; }
+.invite-invalid .btn { margin-top: 8px; }
+
+/* Loading skeleton (shown while share-link-preview resolves) */
+.invite-loading { display: flex; flex-direction: column; gap: 8px; }
+.invite-skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--bg-elev-2) 0%, var(--bg-hover) 50%, var(--bg-elev-2) 100%);
+  background-size: 200% 100%;
+  animation: invite-skel 1.3s ease-in-out infinite;
+}
+.invite-skeleton-headline { height: 22px; width: 70%; }
+.invite-skeleton-row { height: 44px; }
+@keyframes invite-skel {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .invite-skeleton { animation: none; }
+}
+
+/* First + last name grid: side-by-side on desktop, stacked on mobile */
+.invite-name-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.invite-name-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.invite-name-field label { font-size: 12px; color: var(--text-muted); margin-bottom: -4px; }
+.invite-name-field input {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  outline: none;
+  min-width: 0;
+}
+.invite-name-field input:focus { border-color: var(--accent); }
+
+/* Sign-up ⇄ sign-in toggle area (no divider rules) */
+.share-landing-toggle { margin-top: 14px; margin-bottom: 0; }
+.share-landing-toggle::before,
+.share-landing-toggle::after { display: none; }
+.share-landing-pitch { margin-bottom: 14px; }
+
+/* Lightweight text-button: shared by landing toggle + sign-in back button */
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  padding: 0;
+  cursor: pointer;
+  text-align: center;
+}
+.btn-link:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* ------------------------------------------------------------------
+   Share-link row inside the share modal (the "Copy link" field at the
+   top of the modal — primary flow, email invite falls below).
+   ------------------------------------------------------------------ */
+.share-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.share-link-url {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.share-link-url:focus { border-color: var(--accent); }
+.share-link-copy { min-width: 72px; }
+.share-link-copy[data-copied="true"] {
+  background: var(--success, #4ade80);
+  border-color: var(--success, #4ade80);
+  color: var(--accent-text);
+}
+
+/* Mobile: stack first/last name inputs, stack copy button below URL */
+@media (max-width: 500px) {
+  .invite-name-row { grid-template-columns: 1fr; gap: 8px; }
+}
+@media (max-width: 600px) {
+  .invite-card { max-width: 100%; padding: 16px; }
+  .invite-activity { font-size: 17px; }
+  .share-landing-pitch { font-size: 13px; max-width: 30ch; margin-bottom: 10px; }
+  .share-link-row { flex-direction: column; gap: 8px; }
+  .share-link-copy {
+    width: 100%;
+    min-height: 44px;
+  }
+  .share-link-url { min-height: 44px; font-size: 14px; }
+}
