@@ -127,6 +127,10 @@ let gearList = [];
 let activities = [];
 let itemsByActivity = {};             // activity_id -> array of activity_items rows
 let customFiltersByActivity = {};     // activity_id -> array of custom_filters rows
+let membersByActivity = {};           // activity_id -> array of {activity_id, user_id, role, joined_at}
+let invitesByActivity = {};           // activity_id (owner only) -> array of pending invites
+let profilesById = {};                // user_id -> {id, display_name, email}
+let foreignGearById = {};             // gear_id -> gear row (for gear owned by co-members)
 let activeActivityId = null;
 let displayUnit = localStorage.getItem(LS_UNIT_KEY) || 'g';
 let gearSearchQuery = '';
@@ -137,6 +141,11 @@ let editingGearId = null;             // null = adding
 let editingActivityId = null;         // null = adding
 let dragState = null;
 let mobileMode = localStorage.getItem('pack:mobileMode') || 'library'; // 'library' | 'packing'
+let realtimeChannel = null;
+let realtimeChannelActivityId = null;
+let shareModalActivityId = null;
+let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
+let pendingOpenActivityId = null;     // consumed from ?activity= on boot, applied after sign-in
 
 // ------------------------------------------------------------------
 // DOM helpers
@@ -305,13 +314,24 @@ function setStatus(msg, kind) {
 // ------------------------------------------------------------------
 async function loadAll() {
   setStatus('Loading…');
-  const [gearRes, actRes, itemRes, filterRes] = await Promise.all([
-    supabase.from('gear').select('*').order('created_at', { ascending: false }),
+  const myId = currentUser?.id;
+  // Library only shows own gear. Shared activities pull foreign gear separately
+  // after activity_items are loaded.
+  const gearQuery = myId
+    ? supabase.from('gear').select('*').eq('owner_id', myId).order('created_at', { ascending: false })
+    : supabase.from('gear').select('*').order('created_at', { ascending: false });
+  const [gearRes, actRes, itemRes, filterRes, memberRes, inviteRes] = await Promise.all([
+    gearQuery,
     supabase.from('activities').select('*').order('position', { ascending: true }),
     supabase.from('activity_items').select('*').order('position', { ascending: true }),
     supabase.from('custom_filters').select('*').order('position', { ascending: true }),
+    supabase.from('activity_members').select('*'),
+    supabase.from('activity_invites').select('*').is('accepted_at', null),
   ]);
-  for (const [name, res] of [['gear', gearRes], ['activities', actRes], ['items', itemRes], ['filters', filterRes]]) {
+  for (const [name, res] of [
+    ['gear', gearRes], ['activities', actRes], ['items', itemRes],
+    ['filters', filterRes], ['members', memberRes], ['invites', inviteRes],
+  ]) {
     if (res.error) { setStatus(`Load ${name}: ${res.error.message}`, 'error'); return; }
   }
   gearList = gearRes.data || [];
@@ -324,11 +344,92 @@ async function loadAll() {
   for (const f of filterRes.data || []) {
     (customFiltersByActivity[f.activity_id] ||= []).push(f);
   }
+  membersByActivity = {};
+  for (const m of memberRes.data || []) {
+    (membersByActivity[m.activity_id] ||= []).push(m);
+  }
+  invitesByActivity = {};
+  for (const inv of inviteRes.data || []) {
+    (invitesByActivity[inv.activity_id] ||= []).push(inv);
+  }
   if (!activeActivityId || !activities.some((a) => a.id === activeActivityId)) {
     activeActivityId = activities[0]?.id || null;
   }
+  await loadForeignGear();
+  await loadCoMemberProfiles();
   setStatus('');
   render();
+  syncRealtimeSubscription();
+}
+
+// Gear rows referenced by activity_items but not in the user's own library —
+// i.e. gear contributed by co-members on shared activities. RLS allows SELECT
+// on any gear row referenced by an activity_item of an activity we're a
+// member of. We store these separately from gearList so the Gear Library UI
+// keeps showing only your own stuff.
+async function loadForeignGear() {
+  const myOwned = new Set(gearList.map((g) => g.id));
+  const needed = new Set();
+  for (const items of Object.values(itemsByActivity)) {
+    for (const it of items) {
+      if (it.gear_id && !myOwned.has(it.gear_id)) needed.add(it.gear_id);
+    }
+  }
+  if (!needed.size) {
+    foreignGearById = {};
+    return;
+  }
+  const { data, error } = await supabase
+    .from('gear')
+    .select('*')
+    .in('id', Array.from(needed));
+  if (error) {
+    console.warn('loadForeignGear error', error);
+    foreignGearById = {};
+    return;
+  }
+  const next = {};
+  for (const g of data || []) next[g.id] = g;
+  foreignGearById = next;
+}
+
+async function loadCoMemberProfiles() {
+  const needed = new Set();
+  for (const ms of Object.values(membersByActivity)) {
+    for (const m of ms) if (m.user_id) needed.add(m.user_id);
+  }
+  for (const g of Object.values(foreignGearById)) {
+    if (g.owner_id) needed.add(g.owner_id);
+  }
+  if (currentUser?.id) needed.delete(currentUser.id);
+  if (!needed.size) {
+    profilesById = currentUser
+      ? { [currentUser.id]: {
+          id: currentUser.id,
+          display_name: currentUser.user_metadata?.full_name || null,
+          email: currentUser.email || null,
+        } }
+      : {};
+    return;
+  }
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name')
+    .in('id', Array.from(needed));
+  const next = {};
+  if (currentUser?.id) {
+    next[currentUser.id] = {
+      id: currentUser.id,
+      display_name: currentUser.user_metadata?.full_name || null,
+      email: currentUser.email || null,
+    };
+  }
+  if (error) {
+    console.warn('loadCoMemberProfiles error', error);
+  } else {
+    for (const p of data || []) next[p.id] = { ...p, email: null };
+  }
+  profilesById = next;
 }
 
 function activeActivity() {
@@ -339,6 +440,43 @@ function itemsFor(activityId) {
 }
 function customFiltersFor(activityId) {
   return customFiltersByActivity[activityId] || [];
+}
+function membersFor(activityId) {
+  return membersByActivity[activityId] || [];
+}
+function invitesFor(activityId) {
+  return invitesByActivity[activityId] || [];
+}
+function getGearById(id) {
+  return gearList.find((g) => g.id === id) || foreignGearById[id] || null;
+}
+function isOwnerOf(activityId) {
+  const a = activities.find((x) => x.id === activityId);
+  return !!(a && currentUser && a.owner_id === currentUser.id);
+}
+function isSharedActivity(activityId) {
+  return (membersFor(activityId).length + invitesFor(activityId).length) > 1
+    || membersFor(activityId).length > 1;
+}
+function displayNameFor(userId) {
+  const p = profilesById[userId];
+  if (!p) return null;
+  const name = (p.display_name || '').trim();
+  if (name) return name;
+  if (userId === currentUser?.id) return currentUser.email || 'You';
+  return null;
+}
+function ownerChipEl(userId, { size = '' } = {}) {
+  const name = displayNameFor(userId) || '';
+  const initial = (name || '?').slice(0, 1).toUpperCase();
+  const hue = hashHue(userId || '');
+  const cls = 'owner-chip' + (size ? ` owner-chip-${size}` : '');
+  return h('span', {
+    class: cls,
+    title: name || 'Member',
+    style: `background: hsl(${hue} 58% 42%); color: #fff;`,
+    'aria-label': name || 'Member',
+  }, initial);
 }
 
 // ------------------------------------------------------------------
@@ -646,6 +784,8 @@ function renderActivity() {
   const totalEl = $('#activity-total');
   const resetBtn = $('#reset-checklist-btn');
   const editBtn = $('#edit-activity-btn');
+  const shareBtn = $('#share-activity-btn');
+  const shareCount = $('#share-activity-count');
 
   list.innerHTML = '';
   const activity = activeActivity();
@@ -654,11 +794,26 @@ function renderActivity() {
     totalEl.textContent = 'Total: —';
     resetBtn.disabled = true;
     editBtn.disabled = true;
+    if (shareBtn) shareBtn.disabled = true;
+    if (shareCount) { shareCount.textContent = ''; shareCount.classList.remove('visible'); }
     return;
   }
   const items = itemsFor(activity.id);
   resetBtn.disabled = !items.length;
   editBtn.disabled = false;
+  if (shareBtn) shareBtn.disabled = false;
+
+  // Share-button badge: show combined member + pending-invite count when > 1.
+  if (shareCount) {
+    const total = membersFor(activity.id).length + invitesFor(activity.id).length;
+    if (total > 1) {
+      shareCount.textContent = String(total);
+      shareCount.classList.add('visible');
+    } else {
+      shareCount.textContent = '';
+      shareCount.classList.remove('visible');
+    }
+  }
 
   const activeWeather = new Set(activity.active_weathers || []);
   const activeCustom = new Set(activity.active_custom_filter_ids || []);
@@ -675,9 +830,10 @@ function renderActivity() {
     return tags.some((t) => activeCustom.has(t));
   };
 
+  const shared = membersFor(activity.id).length > 1;
   const visibleItems = [];
   for (const item of items) {
-    const gear = gearList.find((g) => g.id === item.gear_id);
+    const gear = getGearById(item.gear_id);
     if (!gear) continue;
     if (passWeather(item) && passCustom(item)) visibleItems.push({ item, gear });
   }
@@ -687,7 +843,7 @@ function renderActivity() {
   } else {
     empty.classList.add('hidden');
     for (const { item, gear } of visibleItems) {
-      list.appendChild(activityItemRow(activity, item, gear));
+      list.appendChild(activityItemRow(activity, item, gear, { shared }));
     }
   }
 
@@ -699,7 +855,8 @@ function renderActivity() {
   totalEl.textContent = `Total: ${formatWeight(total)}`;
 }
 
-function activityItemRow(activity, item, gear) {
+function activityItemRow(activity, item, gear, opts = {}) {
+  const shared = !!opts.shared;
   const imgNode = gearImageEl(gear.image_url);
   const imgEl = gear.image_url
     ? h('button', {
@@ -789,6 +946,17 @@ function activityItemRow(activity, item, gear) {
           )
         : h('div', { class: 'item-weight' }, formatWeight(gear.weight_grams)));
 
+  // Owner chip: only visible on shared activities. Helps distinguish whose
+  // gear is on each row without leaking avatars when a list is solo.
+  const chip = shared ? ownerChipEl(gear.owner_id) : null;
+
+  // Delete permission: on shared lists, anyone can delete rows for gear they
+  // own; the activity owner can delete any row. RLS enforces this server-side
+  // too — this is just a UX guard so the button isn't presented when the
+  // server would reject it.
+  const canRemove = !shared
+    || (currentUser && (gear.owner_id === currentUser.id || isOwnerOf(activity.id)));
+
   const row = h('div', {
     class: 'activity-item' + (item.packed ? ' packed' : ''),
     draggable: 'true',
@@ -811,6 +979,7 @@ function activityItemRow(activity, item, gear) {
       onclick: (e) => e.stopPropagation(),
     }),
     h('div', { class: 'item-check-badge', 'aria-hidden': 'true' }, '✓'),
+    chip,
     imgEl,
     h('div', { class: 'activity-item-meta' },
       h('div', { class: 'gear-name-row' }, gear.name || 'Unnamed'),
@@ -821,11 +990,13 @@ function activityItemRow(activity, item, gear) {
       weatherChips,
     ),
     weightEl,
-    h('button', {
-      class: 'item-remove',
-      title: 'Remove from this list',
-      onclick: (e) => { e.stopPropagation(); removeGearFromActivity(activity.id, gear.id); },
-    }, '×'),
+    canRemove
+      ? h('button', {
+          class: 'item-remove',
+          title: 'Remove from this list',
+          onclick: (e) => { e.stopPropagation(); removeGearFromActivity(activity.id, gear.id); },
+        }, '×')
+      : null,
   );
   return row;
 }
@@ -1699,27 +1870,6 @@ function setScreenshotProgress(text) {
   wrap.classList.remove('hidden');
 }
 
-async function handleScreenshotFile(file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  if ($('#gear-modal').classList.contains('hidden')) openAddGear();
-  try {
-    setScreenshotProgress('Preparing screenshot…');
-    const { base64, mediaType, dataUrl } = await fileToResizedDataUrl(file);
-    $('#screenshot-preview').src = dataUrl;
-    setScreenshotState('preview');
-    setScreenshotProgress('Reading the screenshot with Claude…');
-    $('#fetch-status').textContent = '';
-    const res = await callExtractGear({ image: { base64, mediaType }, mode: 'screenshot' });
-    applyExtracted(res.data);
-    setScreenshotProgress(null);
-    $('#fetch-status').textContent = 'Filled in what we could see — review and save.';
-  } catch (err) {
-    setScreenshotProgress(null);
-    setScreenshotState($('#screenshot-preview').getAttribute('src') ? 'preview' : 'idle');
-    $('#fetch-status').textContent = err.message || 'Could not read the screenshot.';
-  }
-}
-
 function setIdentifyPhotoStatus(text, { loading = false, error = false } = {}) {
   const el = $('#identify-photo-status');
   el.classList.remove('error', 'loading');
@@ -1886,8 +2036,43 @@ function selectCandidate(i) {
   const entry = photoQueue[photoIndex];
   if (!entry || !entry.candidates || i < 0 || i >= entry.candidates.length) return;
   entry.selectedIndex = i;
-  applyCandidateForce(entry.candidates[i], entry.dataUrl);
+  const c = entry.candidates[i];
+  applyCandidateForce(c, entry.dataUrl);
   renderCandidatesPicker(entry);
+  // Server only eagerly enriches the top candidate (to keep Anthropic call
+  // counts bounded for multi-photo bursts). Lazy-enrich an alternate when
+  // it's clicked, then re-apply if the user is still on it.
+  if (i > 0 && c && c.name && !c.enriched) maybeEnrichCandidate(entry, i);
+}
+
+async function maybeEnrichCandidate(entry, idx) {
+  const c = entry.candidates[idx];
+  if (!c || c.enriching || c.enriched) return;
+  if (c.weightGrams != null && c.url && c.imageUrl) {
+    c.enriched = true;
+    return;
+  }
+  c.enriching = true;
+  try {
+    const res = await callExtractGear({ identity: { name: c.name, brand: c.brand } });
+    const d = res.data || {};
+    c.weightGrams = c.weightGrams ?? d.weightGrams ?? null;
+    c.url = c.url || d.url || null;
+    c.imageUrl = c.imageUrl || d.imageUrl || null;
+    c.enriched = true;
+    if (
+      isPhotoFlowActive()
+      && photoQueue[photoIndex] === entry
+      && entry.selectedIndex === idx
+    ) {
+      applyCandidateForce(c, entry.dataUrl);
+      renderCandidatesPicker(entry);
+    }
+  } catch (_) {
+    // Enrichment failure is non-fatal — user can still save with what we have.
+  } finally {
+    c.enriching = false;
+  }
 }
 
 function showCurrentPhoto() {
@@ -1954,7 +2139,7 @@ async function processPhotoEntry(entry, { forceMultiple = false } = {}) {
     if (mySeq !== photoSeq) return;
     const res = await callExtractGear({
       image: { base64, mediaType },
-      mode: 'photo',
+      mode: entry.mode || 'photo',
       forceMultiple: forceMultiple || !IS_TOUCH,  // desktop always wants alternates
     });
     if (mySeq !== photoSeq) return;
@@ -1982,7 +2167,7 @@ async function processPhotoEntry(entry, { forceMultiple = false } = {}) {
   }
 }
 
-async function enqueuePhotos(files, { forceMultiple = false } = {}) {
+async function enqueuePhotos(files, { forceMultiple = false, mode = 'photo' } = {}) {
   const valid = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith('image/'));
   if (valid.length === 0) return;
   const accepted = valid.slice(0, MAX_PHOTO_QUEUE);
@@ -2007,6 +2192,7 @@ async function enqueuePhotos(files, { forceMultiple = false } = {}) {
       id: Math.random().toString(36).slice(2),
       file: f,
       dataUrl,
+      mode,
       status: 'pending',
       candidates: null,
       confidence: null,
@@ -2076,6 +2262,7 @@ function openNewActivity() {
   $('#activity-name').value = '';
   $('#activity-emoji').value = '';
   $('#activity-delete-btn').classList.add('hidden');
+  $('#activity-duplicate-btn').classList.add('hidden');
   showModal('activity-modal');
   requestAnimationFrame(() => $('#activity-name').focus());
 }
@@ -2088,6 +2275,7 @@ function openEditActivity(id) {
   $('#activity-name').value = a.name || '';
   $('#activity-emoji').value = a.emoji || '';
   $('#activity-delete-btn').classList.remove('hidden');
+  $('#activity-duplicate-btn').classList.remove('hidden');
   showModal('activity-modal');
 }
 
@@ -2115,6 +2303,95 @@ async function handleSaveActivity() {
   activeActivityId = data.id;
   hideModal('activity-modal');
   render();
+}
+
+// Duplicate an activity and everything scoped to it: its custom filters,
+// its packed-item rows (with quantity/note/tags), and the filter/weather
+// toggles that were active on the source. Custom-filter IDs get remapped
+// from source → copy so the new activity's toggles/items reference the
+// new filter rows, not the originals.
+async function handleDuplicateActivity() {
+  if (!editingActivityId) return;
+  const source = activities.find((x) => x.id === editingActivityId);
+  if (!source) return;
+
+  const existing = new Set(activities.map((a) => a.name));
+  let newName = `${source.name} (copy)`;
+  for (let i = 2; existing.has(newName) && i < 100; i++) {
+    newName = `${source.name} (copy ${i})`;
+  }
+
+  const { data: newAct, error: actErr } = await supabase
+    .from('activities')
+    .insert({
+      name: newName,
+      emoji: source.emoji,
+      position: activities.length,
+      active_weathers: source.active_weathers || [],
+      active_custom_filter_ids: [],
+    })
+    .select()
+    .single();
+  if (actErr) { toast(actErr.message, 'error'); return; }
+
+  const filterIdMap = new Map();
+  let newFilters = [];
+  const srcFilters = [...(customFiltersByActivity[editingActivityId] || [])]
+    .sort((a, b) => a.position - b.position);
+  if (srcFilters.length) {
+    const { data: inserted, error: fErr } = await supabase
+      .from('custom_filters')
+      .insert(srcFilters.map((f) => ({
+        activity_id: newAct.id,
+        label: f.label,
+        position: f.position,
+      })))
+      .select();
+    if (fErr) { toast(fErr.message, 'error'); return; }
+    newFilters = [...inserted].sort((a, b) => a.position - b.position);
+    srcFilters.forEach((oldF, i) => filterIdMap.set(oldF.id, newFilters[i].id));
+  }
+
+  let newItems = [];
+  const srcItems = itemsByActivity[editingActivityId] || [];
+  if (srcItems.length) {
+    const { data: inserted, error: iErr } = await supabase
+      .from('activity_items')
+      .insert(srcItems.map((it) => ({
+        activity_id: newAct.id,
+        gear_id: it.gear_id,
+        position: it.position,
+        packed: false,
+        quantity: it.quantity,
+        note: it.note,
+        weather_tags: it.weather_tags || [],
+        custom_filter_ids: (it.custom_filter_ids || [])
+          .map((fid) => filterIdMap.get(fid))
+          .filter(Boolean),
+      })))
+      .select();
+    if (iErr) { toast(iErr.message, 'error'); return; }
+    newItems = inserted;
+  }
+
+  const remappedActiveFilters = (source.active_custom_filter_ids || [])
+    .map((fid) => filterIdMap.get(fid))
+    .filter(Boolean);
+  if (remappedActiveFilters.length) {
+    await supabase
+      .from('activities')
+      .update({ active_custom_filter_ids: remappedActiveFilters })
+      .eq('id', newAct.id);
+    newAct.active_custom_filter_ids = remappedActiveFilters;
+  }
+
+  activities.push(newAct);
+  itemsByActivity[newAct.id] = newItems;
+  customFiltersByActivity[newAct.id] = newFilters;
+  activeActivityId = newAct.id;
+  hideModal('activity-modal');
+  render();
+  toast(`Duplicated "${source.name}"`);
 }
 
 async function handleDeleteActivity() {
@@ -2153,6 +2430,7 @@ function wire() {
 
   // Header
   $('#add-gear-btn').addEventListener('click', openAddGear);
+  $('#gear-empty-add-btn').addEventListener('click', openAddGear);
   $('#unit-toggle').addEventListener('click', () => {
     const i = UNIT_CYCLE.indexOf(displayUnit);
     displayUnit = UNIT_CYCLE[(i + 1) % UNIT_CYCLE.length];
@@ -2276,6 +2554,7 @@ function wire() {
   // Activity modal
   $('#activity-save-btn').addEventListener('click', handleSaveActivity);
   $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
+  $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
   // Enter-to-save in activity name field
   $('#activity-name').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveActivity(); }
@@ -2356,33 +2635,8 @@ function wire() {
     advancePhotoQueue();
   });
 
-  // Desktop multi-photo dropzone (drop or click to choose multiple files)
-  const upz = $('#upload-photos-dropzone');
-  const upInput = $('#upload-photos-input');
-  upz.addEventListener('click', () => upInput.click());
-  upz.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); upInput.click(); }
-  });
-  upInput.addEventListener('change', (e) => {
-    const fs = Array.from(e.target.files || []);
-    e.target.value = '';
-    if (fs.length) enqueuePhotos(fs);
-  });
-  upz.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer?.types.includes('Files')) return;
-    e.preventDefault();
-    upz.classList.add('drag-over');
-  });
-  upz.addEventListener('dragleave', () => upz.classList.remove('drag-over'));
-  upz.addEventListener('drop', (e) => {
-    if (!e.dataTransfer?.types.includes('Files')) return;
-    e.preventDefault();
-    upz.classList.remove('drag-over');
-    const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
-    if (fs.length) enqueuePhotos(fs);
-  });
-
-  // Screenshot dropzone inside gear modal
+  // Unified screenshot/photo dropzone — accepts screenshots, gear photos, or
+  // multiple files. Server auto-classifies via mode='auto'.
   const dz = $('#screenshot-dropzone');
   const fileInput = $('#screenshot-file-input');
   dz.addEventListener('click', () => fileInput.click());
@@ -2390,21 +2644,23 @@ function wire() {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
   });
   fileInput.addEventListener('change', (e) => {
-    const f = e.target.files?.[0];
+    const fs = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
     e.target.value = '';
-    if (f) handleScreenshotFile(f);
+    if (fs.length) enqueuePhotos(fs, { mode: 'auto' });
   });
   $('#screenshot-remove').addEventListener('click', () => {
     resetScreenshotUI();
+    clearPhotoQueue();
   });
   dz.addEventListener('paste', (e) => {
     const items = e.clipboardData?.items || [];
+    const files = [];
     for (const it of items) {
-      if (it.kind === 'file' && it.type.startsWith('image/')) {
-        e.preventDefault();
-        handleScreenshotFile(it.getAsFile());
-        return;
-      }
+      if (it.kind === 'file' && it.type.startsWith('image/')) files.push(it.getAsFile());
+    }
+    if (files.length) {
+      e.preventDefault();
+      enqueuePhotos(files, { mode: 'auto' });
     }
   });
   dz.addEventListener('dragover', (e) => {
@@ -2417,8 +2673,8 @@ function wire() {
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
     dz.classList.remove('drag-over');
-    const f = e.dataTransfer.files?.[0];
-    if (f) handleScreenshotFile(f);
+    const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
+    if (fs.length) enqueuePhotos(fs, { mode: 'auto' });
   });
 
   // Activity body DnD
@@ -2432,7 +2688,8 @@ function wire() {
   rz.addEventListener('dragleave', () => rz.classList.remove('active'));
   rz.addEventListener('drop', (e) => { e.preventDefault(); rz.classList.remove('active'); handleRemoveDropzone(); });
 
-  // Global drop-anywhere for screenshots → opens Add Gear flow
+  // Global drop-anywhere → opens Add Gear flow. Server auto-classifies
+  // dropped files as either screenshots or gear photos via mode='auto'.
   const overlay = $('#global-drop-overlay');
   let dragDepth = 0;
   const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes('Files');
@@ -2458,12 +2715,7 @@ function wire() {
     overlay.classList.remove('active');
     const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
     if (fs.length === 0) return;
-    if (fs.length === 1) {
-      handleScreenshotFile(fs[0]);
-    } else {
-      // Multiple photos dropped → kick off the photo queue.
-      enqueuePhotos(fs);
-    }
+    enqueuePhotos(fs, { mode: 'auto' });
   });
 }
 

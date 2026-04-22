@@ -24,7 +24,7 @@
       <div class="auth-card">
       <div class="brand" style="justify-content: center;">
         <span class="brand-mark">⛰</span>
-        <h1>PackUp</h1>
+        <h1>PackUpGear</h1>
       </div>
 
       <!-- Default: signup CTA + existing-user login -->
@@ -84,7 +84,7 @@
     <header class="app-header">
       <div class="brand">
         <span class="brand-mark">⛰</span>
-        <h1>PackUp</h1>
+        <h1>PackUpGear</h1>
       </div>
       <div class="header-actions">
         <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
@@ -109,8 +109,10 @@
         <div id="brand-filter-pills" class="brand-filter-pills hidden" aria-label="Filter by brand"></div>
         <div id="gear-list" class="gear-list" aria-live="polite"></div>
         <div id="gear-empty" class="empty-state hidden">
-          <p>No gear yet.</p>
-          <p class="muted">Click <strong>+ Add gear</strong> to paste a product URL.</p>
+          <div class="empty-state-icon" aria-hidden="true">🎒</div>
+          <p class="empty-state-title">Your gear library is empty</p>
+          <p class="muted">Add something you own — paste a product URL, upload a photo, or fill in details manually.</p>
+          <button id="gear-empty-add-btn" class="btn btn-primary" type="button">+ Add your first gear</button>
         </div>
       </aside>
 
@@ -144,6 +146,15 @@
           </div>
           <div class="activity-actions">
             <button id="reset-checklist-btn" class="btn btn-ghost">Reset checklist</button>
+            <button id="share-activity-btn" class="btn btn-ghost share-activity-btn" type="button" aria-label="Share this list" title="Share this list">
+              <svg class="share-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                <polyline points="16 6 12 2 8 6" />
+                <line x1="12" y1="2" x2="12" y2="15" />
+              </svg>
+              <span class="share-activity-label">Share</span>
+              <span id="share-activity-count" class="share-activity-count" aria-hidden="true"></span>
+            </button>
             <button id="edit-activity-btn" class="btn btn-ghost">Edit activity</button>
           </div>
         </footer>
@@ -269,14 +280,14 @@
             <p id="fetch-status" class="field-hint muted"></p>
           </div>
 
-          <!-- Section 3: Screenshot (desktop / hover-pointer devices only) -->
+          <!-- Section 3: Screenshot OR gear photo(s) (desktop / hover-pointer devices only) -->
           <div class="screenshot-section-wrap">
-            <div class="section-label">③ Or drop a screenshot</div>
+            <div class="section-label">③ Or drop screenshots / photos of gear</div>
             <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
               <div class="dropzone-idle">
                 <div class="dropzone-icon">🖼️</div>
-                <div class="dropzone-title">Drop a product screenshot here</div>
-                <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+                <div class="dropzone-title">Drop a screenshot or photos of gear</div>
+                <div class="dropzone-sub muted">screenshots, gear photos, or both · up to 12 files · paste with ⌘V · click to choose</div>
               </div>
               <div class="dropzone-preview hidden">
                 <img id="screenshot-preview" alt="Screenshot preview" />
@@ -289,23 +300,12 @@
                 </div>
               </div>
             </div>
-            <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
-          </div>
-
-          <!-- Section 3b: Multi-photo upload (desktop / hover-pointer only) -->
-          <div class="upload-photos-section-wrap">
-            <div class="section-label">④ Or upload photos of gear</div>
-            <div id="upload-photos-dropzone" class="upload-photos-dropzone" tabindex="0">
-              <div class="upload-photos-icon">📸</div>
-              <div class="upload-photos-title">Drop one or more gear photos here</div>
-              <div class="upload-photos-sub muted">we'll work through them one at a time · up to 12 at once</div>
-            </div>
-            <input type="file" id="upload-photos-input" accept="image/*" multiple class="hidden" />
+            <input type="file" id="screenshot-file-input" accept="image/*" multiple class="hidden" />
           </div>
         </div>
 
-        <!-- Section 4 (5 with new section): Manual -->
-        <div class="section-label" id="manual-section-label">⑤ Or edit details manually</div>
+        <!-- Section 4: Manual -->
+        <div class="section-label" id="manual-section-label">④ Or edit details manually</div>
         <div class="form-grid">
           <div class="field">
             <label for="gear-name">Name</label>
@@ -406,7 +406,16 @@
     <div class="modal-panel modal-narrow">
       <header class="modal-header">
         <h3 id="activity-modal-title">New activity</h3>
-        <button class="icon-btn" data-close="activity-modal" aria-label="Close">×</button>
+        <div class="modal-header-actions">
+          <button id="activity-modal-share-btn" class="icon-btn activity-modal-share-btn hidden" type="button" aria-label="Share this list" title="Share this list">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+              <polyline points="16 6 12 2 8 6" />
+              <line x1="12" y1="2" x2="12" y2="15" />
+            </svg>
+          </button>
+          <button class="icon-btn" data-close="activity-modal" aria-label="Close">×</button>
+        </div>
       </header>
       <div class="modal-body">
         <div class="field">
@@ -417,15 +426,62 @@
           <label for="activity-name">Name</label>
           <input id="activity-name" type="text" placeholder="Climbing" />
         </div>
+        <div id="activity-invite-field" class="field">
+          <label for="activity-invite-emails">Share with (optional)</label>
+          <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
+          <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
+        </div>
       </div>
       <footer class="modal-footer">
         <button id="activity-delete-btn" class="btn btn-danger hidden">Delete</button>
+        <button id="activity-duplicate-btn" class="btn btn-secondary hidden">Duplicate</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" data-close="activity-modal">Cancel</button>
         <button id="activity-save-btn" class="btn btn-primary">Save</button>
       </footer>
     </div>
   </div>
+
+  <!-- Share activity modal -->
+  <div id="share-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="share-modal-title">
+    <div class="modal-backdrop" data-close="share-modal"></div>
+    <div class="modal-panel modal-narrow share-modal-panel">
+      <header class="modal-header">
+        <h3 id="share-modal-title">Share packing list</h3>
+        <button class="icon-btn" data-close="share-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <p id="share-modal-subtitle" class="muted share-modal-subtitle"></p>
+
+        <div class="share-section">
+          <div class="share-section-label">Invite by email</div>
+          <form id="share-invite-form" class="share-invite-form" autocomplete="off">
+            <input id="share-invite-email" type="email" inputmode="email" autocomplete="email" placeholder="friend@example.com" required />
+            <button id="share-invite-submit" class="btn btn-primary" type="submit">Send invite</button>
+          </form>
+          <p id="share-invite-status" class="field-hint muted share-invite-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="share-section">
+          <div class="share-section-label">Members</div>
+          <ul id="share-members-list" class="share-members-list" aria-live="polite"></ul>
+        </div>
+
+        <div id="share-invites-section" class="share-section hidden">
+          <div class="share-section-label">Pending invites</div>
+          <ul id="share-invites-list" class="share-invites-list" aria-live="polite"></ul>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button id="share-leave-btn" class="btn btn-danger hidden" type="button">Leave list</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close="share-modal">Done</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Invite landing banner (when ?invite= URL is consumed) -->
+  <div id="invite-banner" class="invite-banner hidden" role="status" aria-live="polite"></div>
 
   <!-- Gear image preview (lightbox) — tapped from any thumbnail -->
   <div id="image-preview-modal" class="modal hidden image-preview-modal" role="dialog" aria-modal="true" aria-label="Image preview">

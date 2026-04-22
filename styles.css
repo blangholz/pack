@@ -810,6 +810,9 @@ img.brand-badge-logo {
   color: var(--text-dim);
 }
 .empty-state p { margin: 4px 0; }
+.empty-state-icon { font-size: 44px; line-height: 1; margin-bottom: 8px; }
+.empty-state-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.empty-state .btn { margin-top: 14px; }
 
 /* ============ Remove dropzone ============ */
 .remove-dropzone {
@@ -2125,3 +2128,241 @@ img.brand-badge-logo {
   .gear-search,
   .auth-form input { font-size: 16px; }
 }
+
+/* ============ Share (members, invites, owner chips) ============ */
+
+/* Share button in the activity footer */
+.share-activity-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+}
+.share-activity-btn .share-icon {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+.share-activity-btn:hover .share-icon { color: var(--text); }
+.share-activity-btn .share-activity-label { display: inline; }
+.share-activity-count {
+  display: none;
+  min-width: 18px;
+  padding: 0 6px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-text);
+  border-radius: 999px;
+}
+.share-activity-count.visible { display: inline-block; }
+
+/* Stack the header icons in the activity modal */
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.activity-modal-share-btn {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Share modal */
+.share-modal-panel .modal-body { padding-bottom: 20px; }
+.share-modal-subtitle {
+  margin: 0 0 14px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.share-section { margin-bottom: 18px; }
+.share-section:last-child { margin-bottom: 0; }
+.share-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+/* Invite form inside share modal */
+.share-invite-form {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.share-invite-form input[type="email"] {
+  flex: 1;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  font-size: 13px;
+  min-width: 0;
+}
+.share-invite-form input[type="email"]:focus {
+  border-color: var(--accent);
+}
+.share-invite-status {
+  min-height: 16px;
+  margin-top: 6px;
+}
+.share-invite-status.success { color: var(--success); }
+.share-invite-status.error { color: var(--danger); }
+
+/* Member + pending-invite lists */
+.share-members-list,
+.share-invites-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.share-member-row,
+.share-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.share-member-main,
+.share-invite-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.share-member-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-member-sub,
+.share-invite-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.share-role-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.share-role-badge.role-owner {
+  background: rgba(139, 157, 255, 0.18);
+  color: var(--accent);
+}
+.share-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Avatar chip — a circle with an initial, color seeded from user id */
+.owner-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--bg-hover);
+  flex-shrink: 0;
+  user-select: none;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+.owner-chip-sm { width: 20px; height: 20px; font-size: 10px; }
+.owner-chip-lg { width: 32px; height: 32px; font-size: 13px; }
+
+/* Owner chip shown at the start of each item row in a shared list */
+.activity-item .owner-chip {
+  margin-right: 4px;
+}
+
+/* Invite banner on top of main view, shown right after consuming ?invite= */
+.invite-banner {
+  position: fixed;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 200;
+  max-width: calc(100vw - 24px);
+  padding: 10px 14px;
+  background: rgba(139, 157, 255, 0.14);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow);
+}
+.invite-banner.error {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: var(--danger);
+}
+.invite-banner .invite-banner-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.invite-banner .invite-banner-close:hover { color: var(--text); }
+
+/* Mobile: give share modal roomy touch targets */
+@media (max-width: 600px) {
+  .share-activity-btn {
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+  .activity-modal-share-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .share-invite-form { flex-direction: column; gap: 8px; }
+  .share-invite-form .btn { width: 100%; min-height: 44px; }
+  .share-invite-form input[type="email"] { font-size: 16px; min-height: 44px; }
+  .share-member-row,
+  .share-invite-row {
+    padding: 10px 12px;
+  }
+  .share-row-actions .btn { min-height: 36px; }
+}
+
+/* Hide the invite-count badge until someone is actually there — prevents a
+   lone inviter from seeing "1" on their own list. */
+.share-activity-count:empty { display: none; }
