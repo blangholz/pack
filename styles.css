@@ -3147,14 +3147,11 @@ body[data-view-mode="admin"] #admin-view { display: flex; }
 
 #admin-refresh-btn { margin-left: auto; }
 
-/* Stats grid — 3 cols on medium, 6 cols on wide. */
+/* Stats grid — auto-fit so any number of cards flows cleanly. */
 .admin-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
-}
-@media (min-width: 1080px) {
-  .admin-stats-grid { grid-template-columns: repeat(6, 1fr); }
 }
 .admin-stat-card {
   background: var(--bg-elev);
@@ -3191,6 +3188,22 @@ body[data-view-mode="admin"] #admin-view { display: flex; }
 @keyframes admin-stat-flash {
   0%   { background: var(--accent); color: var(--accent-text); }
   100% { background: var(--bg-elev); color: var(--text); }
+}
+
+/* "Online now" card — pulsing dot in the label, subtle success-color accent. */
+.admin-stat-card.admin-stat-online .admin-stat-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-online-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  animation: admin-live-pulse 2s infinite;
+  flex-shrink: 0;
 }
 
 /* Shared card surface for the chart / users table. */

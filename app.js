@@ -5045,6 +5045,7 @@ async function onSignedIn(session) {
   await applyPendingShareToken();
   applyPendingOpenActivity();
   syncRealtimeSubscription();
+  ensurePresenceChannel();
   initAdminOnSignIn();
   await maybePromptForOnboarding();
   await maybePromptForFirstActivity();
@@ -5087,6 +5088,7 @@ function onSignedOut() {
   globalMembersChannel = null;
   globalCustomFiltersChannel = null;
   globalGearChannel = null;
+  teardownPresence();
   teardownAdmin();
   const banner = $('#invite-banner');
   if (banner) banner.classList.add('hidden');
@@ -5225,6 +5227,67 @@ let adminRefetchTimer = null;
 let adminLiveStaleTimer = null;
 let adminLoadedOnce = false;
 
+// Presence: every signed-in tab joins `pack:presence` so we can show a live
+// "on site now" count in the admin dashboard. Keyed by user.id → multiple
+// tabs from the same user dedupe. Payload intentionally minimal (user_id
+// only, no email/name) — other authenticated clients technically *could*
+// subscribe and read presence state; user.id alone isn't sensitive, names
+// are.
+let presenceChannel = null;
+let adminPresenceBound = false;
+
+function ensurePresenceChannel() {
+  if (presenceChannel || !currentUser) return;
+  try {
+    const ch = supabase.channel('pack:presence', {
+      config: { presence: { key: currentUser.id } },
+    });
+    ch.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        try { await ch.track({ ts: Date.now() }); } catch (e) { console.warn('[presence] track failed', e); }
+      }
+    });
+    presenceChannel = ch;
+  } catch (e) {
+    console.warn('[presence] channel join failed', e);
+  }
+}
+
+function teardownPresence() {
+  if (!presenceChannel) return;
+  try { presenceChannel.untrack(); } catch {}
+  try { supabase.removeChannel(presenceChannel); } catch {}
+  presenceChannel = null;
+  adminPresenceBound = false;
+}
+
+function presenceOnlineCount() {
+  if (!presenceChannel) return 0;
+  try {
+    const state = presenceChannel.presenceState();
+    return Object.keys(state).length;
+  } catch { return 0; }
+}
+
+function renderAdminOnline() {
+  const card = document.querySelector('.admin-stat-card[data-stat="online"]');
+  if (!card) return;
+  const n = presenceOnlineCount();
+  const v = card.querySelector('.admin-stat-value');
+  const s = card.querySelector('.admin-stat-sub');
+  if (v) v.textContent = String(n);
+  if (s) s.textContent = n === 1 ? 'user on the site' : 'users on the site';
+}
+
+function bindAdminPresence() {
+  if (!presenceChannel || adminPresenceBound) return;
+  presenceChannel.on('presence', { event: 'sync' }, renderAdminOnline);
+  presenceChannel.on('presence', { event: 'join' }, renderAdminOnline);
+  presenceChannel.on('presence', { event: 'leave' }, renderAdminOnline);
+  adminPresenceBound = true;
+  renderAdminOnline();
+}
+
 async function initAdminOnSignIn() {
   try {
     const { data, error } = await supabase.rpc('is_admin');
@@ -5319,6 +5382,8 @@ async function toggleAdminView() {
       adminLoadedOnce = true;
     }
     subscribeAdminRealtime();
+    bindAdminPresence();
+    renderAdminOnline();
   } else {
     document.body.removeAttribute('data-view-mode');
     unsubscribeAdminRealtime();
