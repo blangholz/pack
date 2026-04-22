@@ -694,6 +694,44 @@
     </div>
   </div>
 
+  <!-- Share-link accept confirm (shown when a signed-in user lands on ?share=<token>
+       for a list they aren't already a member of). Skips for existing members. -->
+  <div id="share-accept-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="share-accept-title">
+    <div class="modal-backdrop" data-close="share-accept-modal"></div>
+    <div class="modal-panel">
+      <header class="modal-header">
+        <h3 id="share-accept-title">Join this packing list?</h3>
+        <button class="icon-btn" data-close="share-accept-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <div id="share-accept-card" class="invite-card" aria-live="polite">
+          <div id="share-accept-loading" class="invite-loading">
+            <div class="invite-skeleton invite-skeleton-headline"></div>
+            <div class="invite-skeleton invite-skeleton-row"></div>
+            <div class="invite-skeleton invite-skeleton-row"></div>
+            <div class="invite-skeleton invite-skeleton-row"></div>
+          </div>
+          <div id="share-accept-body" hidden>
+            <p class="invite-kicker">
+              <span id="share-accept-inviter">A friend</span> invited you to pack
+            </p>
+            <h3 id="share-accept-activity" class="invite-activity">—</h3>
+            <ul id="share-accept-items" class="invite-preview-list"></ul>
+            <p id="share-accept-more" class="invite-more muted" hidden></p>
+          </div>
+          <div id="share-accept-invalid" class="invite-invalid" hidden>
+            <p><strong>This invite link isn't valid.</strong></p>
+            <p class="muted">It may have been revoked or the list deleted.</p>
+          </div>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button id="share-accept-decline-btn" class="btn btn-ghost" data-close="share-accept-modal">Not now</button>
+        <button id="share-accept-btn" class="btn btn-primary" type="button" disabled>Add to my lists</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Gear image preview (lightbox) — tapped from any thumbnail -->
   <div id="image-preview-modal" class="modal hidden image-preview-modal" role="dialog" aria-modal="true" aria-label="Image preview">
     <div class="modal-backdrop" data-close="image-preview-modal"></div>

@@ -3645,6 +3645,37 @@ async function applyPendingShareToken() {
   if (!pendingShareToken || !currentUser) return;
   const token = pendingShareToken;
   pendingShareToken = null;
+
+  // Fetch the preview first so we can (a) silently switch if the user is
+  // already a member (no flicker, no confirm modal for a no-op), and
+  // (b) show the "X invited you to <list>" confirm overlay with preview
+  // context for a genuine new join. Same endpoint the unauthed landing uses.
+  let preview = null;
+  try {
+    const { data, error } = await callPublicEdgeFunction('share-link-preview', { token });
+    if (!error && data && data.activity_id) preview = data;
+  } catch {}
+
+  if (preview && activities.find((a) => a.id === preview.activity_id)) {
+    activeActivityId = preview.activity_id;
+    render();
+    syncRealtimeSubscription();
+    markActivitySeen(preview.activity_id);
+    return;
+  }
+
+  if (preview) {
+    showShareAcceptModal(token, preview);
+    return;
+  }
+
+  // Preview endpoint failed (network, rate limit, etc.). Fall back to
+  // accept-first so the user isn't stranded — they'll land on the shared
+  // list even if we couldn't show the confirm overlay.
+  await acceptShareLinkAndSwitch(token);
+}
+
+async function acceptShareLinkAndSwitch(token) {
   showInviteBanner('Joining packing list…');
   const { data, error } = await callEdgeFunction('accept-share-link', { token });
   if (error) {
@@ -3670,6 +3701,102 @@ async function applyPendingShareToken() {
       { autoHide: 4500 },
     );
   }
+}
+
+// ------------------------------------------------------------------
+// Share-accept modal (authed user, not yet a member).
+// ------------------------------------------------------------------
+let pendingShareAcceptToken = null;
+
+function showShareAcceptModal(token, preview) {
+  pendingShareAcceptToken = token;
+
+  const loadingEl = $('#share-accept-loading');
+  const bodyEl = $('#share-accept-body');
+  const invalidEl = $('#share-accept-invalid');
+  if (loadingEl) loadingEl.hidden = true;
+  if (invalidEl) invalidEl.hidden = true;
+  if (bodyEl) bodyEl.hidden = false;
+
+  const inviter = (preview.inviter_name || 'A friend').trim() || 'A friend';
+  const name = preview.activity_name || '—';
+  const emoji = preview.activity_emoji || '';
+  $('#share-accept-inviter').textContent = inviter;
+  $('#share-accept-activity').textContent = emoji ? `${emoji} ${name}` : name;
+
+  const itemsUl = $('#share-accept-items');
+  if (itemsUl) {
+    itemsUl.innerHTML = '';
+    const items = Array.isArray(preview.items_preview) ? preview.items_preview : [];
+    for (const it of items) {
+      const li = document.createElement('li');
+      li.className = 'invite-preview-row';
+      if (it.image_url) {
+        const img = document.createElement('img');
+        img.className = 'invite-preview-img';
+        img.src = it.image_url;
+        img.alt = '';
+        li.appendChild(img);
+      } else {
+        const ph = document.createElement('div');
+        ph.className = 'invite-preview-img-placeholder';
+        ph.textContent = '📦';
+        li.appendChild(ph);
+      }
+      const text = document.createElement('div');
+      text.className = 'invite-preview-text';
+      const n = document.createElement('div');
+      n.className = 'invite-preview-name';
+      n.textContent = it.name || '';
+      text.appendChild(n);
+      if (it.brand) {
+        const b = document.createElement('div');
+        b.className = 'invite-preview-brand';
+        b.textContent = it.brand;
+        text.appendChild(b);
+      }
+      li.appendChild(text);
+      itemsUl.appendChild(li);
+    }
+  }
+
+  const moreEl = $('#share-accept-more');
+  if (moreEl) {
+    const more = Number(preview.more_count || 0);
+    if (more > 0) {
+      moreEl.textContent = `+ ${more} more item${more === 1 ? '' : 's'}`;
+      moreEl.hidden = false;
+    } else {
+      moreEl.hidden = true;
+    }
+  }
+
+  const acceptBtn = $('#share-accept-btn');
+  if (acceptBtn) {
+    acceptBtn.disabled = false;
+    acceptBtn.textContent = 'Add to my lists';
+  }
+
+  showModal('share-accept-modal');
+}
+
+async function handleShareAcceptConfirm() {
+  const token = pendingShareAcceptToken;
+  if (!token) return;
+  const btn = $('#share-accept-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+  try {
+    await acceptShareLinkAndSwitch(token);
+  } finally {
+    pendingShareAcceptToken = null;
+    hideModal('share-accept-modal');
+    if (btn) { btn.textContent = 'Add to my lists'; }
+  }
+}
+
+function handleShareAcceptDecline() {
+  pendingShareAcceptToken = null;
+  hideModal('share-accept-modal');
 }
 
 function applyPendingOpenActivity() {
@@ -4229,6 +4356,8 @@ function wire() {
   $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
   $('#activity-done-btn').addEventListener('click', handleActivityDoneBtn);
   $('#activity-created-share-copy').addEventListener('click', handleActivityCreatedShareCopy);
+  $('#share-accept-btn').addEventListener('click', handleShareAcceptConfirm);
+  $('#share-accept-decline-btn').addEventListener('click', handleShareAcceptDecline);
   // Enter-to-save in activity name field
   $('#activity-name').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveActivity(); }

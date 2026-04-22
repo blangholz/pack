@@ -2928,6 +2928,13 @@ img.brand-badge-logo {
   font-size: 12px;
 }
 
+/* Invite card inside the share-accept modal — stretch to panel width and
+   drop the outer shadow (modal already provides one). */
+#share-accept-modal .invite-card {
+  max-width: 100%;
+  box-shadow: none;
+}
+
 /* Mobile: stack first/last name inputs, stack copy button below URL */
 @media (max-width: 500px) {
   .invite-name-row { grid-template-columns: 1fr; gap: 8px; }

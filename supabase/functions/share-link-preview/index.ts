@@ -146,6 +146,7 @@ Deno.serve(async (req) => {
   const more_count = Math.max(0, totalCount - items_preview.length);
 
   return json({
+    activity_id: activityId,
     activity_name: typeof activity.name === "string" ? activity.name : null,
     activity_emoji: typeof activity.emoji === "string" ? activity.emoji : null,
     inviter_name,
