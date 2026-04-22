@@ -3,8 +3,7 @@
 *::before,
 *::after { box-sizing: border-box; }
 
-:root,
-:root[data-theme="dark"] {
+:root {
   --bg: #0f1115;
   --bg-elev: #171a21;
   --bg-elev-2: #1f232c;
@@ -45,24 +44,6 @@
     --shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
     --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
   }
-}
-
-/* Manual override: light theme regardless of system preference */
-:root[data-theme="light"] {
-  --bg: #f6f7fa;
-  --bg-elev: #ffffff;
-  --bg-elev-2: #fafbfd;
-  --bg-hover: #eef0f5;
-  --border: #e2e5eb;
-  --border-strong: #c9cfd9;
-  --text: #1a1d23;
-  --text-dim: #5b6270;
-  --text-muted: #8a92a1;
-  --accent: #4c5fd5;
-  --accent-hover: #3a4bc0;
-  --accent-text: #ffffff;
-  --shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
 html, body {

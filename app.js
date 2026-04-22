@@ -59,24 +59,6 @@ function readHashError() {
 const LS_UNIT_KEY = 'pack.displayUnit';
 const UNIT_CYCLE = ['g', 'kg', 'oz', 'lb'];
 
-const LS_THEME_KEY = 'pack.theme';
-const THEME_CYCLE = ['auto', 'light', 'dark'];
-const THEME_ICON = { auto: '🌗', light: '☀️', dark: '🌙' };
-const THEME_LABEL = { auto: 'System theme', light: 'Light theme', dark: 'Dark theme' };
-
-function applyTheme(theme) {
-  if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', theme);
-  const btn = document.getElementById('theme-toggle');
-  if (btn) {
-    btn.textContent = THEME_ICON[theme] || THEME_ICON.auto;
-    btn.title = THEME_LABEL[theme] || THEME_LABEL.auto;
-  }
-}
-
-// Apply persisted theme as early as possible to avoid a light-flash on dark.
-applyTheme(localStorage.getItem(LS_THEME_KEY) || 'auto');
-
 const WEATHER_TYPES = [
   { id: 'sunny', label: 'Sunny', emoji: '🌞' },
   { id: 'cold',  label: 'Cold',  emoji: '❄️' },
@@ -1616,14 +1598,6 @@ function wire() {
     localStorage.setItem(LS_UNIT_KEY, displayUnit);
     render();
   });
-  $('#theme-toggle').addEventListener('click', () => {
-    const current = localStorage.getItem(LS_THEME_KEY) || 'auto';
-    const next = THEME_CYCLE[(THEME_CYCLE.indexOf(current) + 1) % THEME_CYCLE.length];
-    localStorage.setItem(LS_THEME_KEY, next);
-    applyTheme(next);
-  });
-  // Re-apply on first wire so the button label is set even when boot ran before DOM ready.
-  applyTheme(localStorage.getItem(LS_THEME_KEY) || 'auto');
   $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
 
   // Auth: toggle between chooser and signup form
