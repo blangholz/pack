@@ -604,9 +604,9 @@ function renderCustomFilterBar() {
   host.appendChild(addBtn);
 
   if (!filters.length) {
-    hint.textContent = 'Click + to add sub-filters (e.g. Trad, Sport, Bouldering)';
+    hint.textContent = 'Tap + to add (e.g. Trad, Sport)';
   } else if (active.size) {
-    hint.textContent = 'Showing equipment + items tagged for selected filters';
+    hint.textContent = 'Filtered';
   } else {
     hint.textContent = 'All items';
   }
