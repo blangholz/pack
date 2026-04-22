@@ -728,37 +728,12 @@ img.brand-badge-logo {
 .activity-item.packed img,
 .activity-item.packed .placeholder-img { opacity: 0.55; }
 
-/* Corner "earmark" check — small success-colored badge pinned to the top-left.
-   Grid slot 1 on desktop is the checkbox; the badge is absolutely positioned
-   so it overlays the corner without reserving grid space. */
-.activity-item .item-check-badge {
-  position: absolute;
-  top: -6px;
-  left: -6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--success);
-  color: #0f1115;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  opacity: 0;
-  transform: scale(0.5);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  pointer-events: none;
-  z-index: 2;
-}
-.activity-item.packed .item-check-badge {
-  opacity: 1;
-  transform: scale(1);
-}
+/* Corner "earmark" check — mobile-only. On desktop the checkbox itself
+   (tinted with --success) signals the packed state; the badge would be
+   redundant. Mobile hides the checkbox, so it gets the badge instead. */
+.activity-item .item-check-badge { display: none; }
 
-.activity-item input.item-checkbox { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.activity-item input.item-checkbox { width: 18px; height: 18px; accent-color: var(--success); cursor: pointer; }
 .activity-item img,
 .activity-item .placeholder-img {
   width: 36px; height: 36px; object-fit: cover; border-radius: var(--radius-sm);
@@ -1785,6 +1760,32 @@ img.brand-badge-logo {
      indicates the packed state visually. */
   .activity-item { grid-template-columns: 40px 1fr auto auto; }
   .activity-item input.item-checkbox { display: none; }
+  .activity-item .item-check-badge {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--success);
+    color: #0f1115;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    transform: scale(0.5);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .activity-item.packed .item-check-badge {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (max-width: 600px) {
