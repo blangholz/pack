@@ -4710,8 +4710,12 @@ async function consumeTokenHashFromUrl() {
   const type = params.get('type');
   if (!token_hash || !type) return null;
   const redirectToRaw = params.get('redirect_to');
-  console.log('[auth] exchanging token_hash from URL, type=', type);
-  const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
+  // Merge redirect_to's params (e.g. ?share=<token>) back into the visible URL
+  // and re-run consumeInviteParamsFromUrl BEFORE verifyOtp. Reason: verifyOtp
+  // can fire the SIGNED_IN auth-state event synchronously, which triggers
+  // onSignedIn → applyPendingShareToken. If pendingShareToken isn't populated
+  // by then, the confirm modal silently no-ops and the user only sees it
+  // after a manual refresh. Doing this first makes the listener-path race-free.
   if (redirectToRaw) {
     try {
       const redirectUrl = new URL(redirectToRaw, window.location.origin);
@@ -4726,6 +4730,8 @@ async function consumeTokenHashFromUrl() {
     }
   }
   consumeInviteParamsFromUrl();
+  console.log('[auth] exchanging token_hash from URL, type=', type);
+  const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
   cleanAuthParamsFromUrl();
   if (error) { console.warn('[auth] verifyOtp failed', error); return { error }; }
   return { session: data?.session || null };
