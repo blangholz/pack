@@ -2056,6 +2056,12 @@ async function handleSaveGear() {
     return;
   }
   hideModal('gear-modal');
+  // On mobile, the user may have opened Add Gear from the Packing tab (via
+  // the suggestion chips, or the header "+ Add gear" button). After a
+  // successful save, flip to Library so they can see the gear they just
+  // added — closing the modal and landing back on an unchanged Packing
+  // view is confusing.
+  setMobileMode('library');
   render();
   if (saved && !saved.image_url && saved.name) {
     backgroundEnrichThumbnail(saved).catch(() => { /* silent */ });
@@ -3829,6 +3835,9 @@ async function applyPendingShareToken() {
     const flag = localStorage.getItem('pack.autoAcceptShare');
     if (flag && flag === token) autoAccept = true;
     localStorage.removeItem('pack.autoAcceptShare');
+    // Same lifetime as the autoAccept flag — once we're signed in and
+    // applying this token, the prefill stash is no longer useful.
+    localStorage.removeItem('pack.lastShareSubmit');
   } catch {}
 
   if (preview && activities.find((a) => a.id === preview.activity_id)) {
@@ -4435,6 +4444,15 @@ async function handleShareSignupSubmit(e) {
   // confirm modal. Scoped to this exact token so a stale flag for one list
   // can't auto-enrol someone into a different list.
   try { localStorage.setItem('pack.autoAcceptShare', pendingShareToken); } catch {}
+  // Also stash name+email so that if the magic link click ends up failing
+  // (network blip, an in-app browser that loses context, etc.) and we fall
+  // back to the share-landing view, we can prefill the form and they only
+  // need to tap "Send" again instead of retyping everything.
+  try {
+    localStorage.setItem('pack.lastShareSubmit', JSON.stringify({
+      token: pendingShareToken, email, name: fullName,
+    }));
+  } catch {}
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
@@ -4602,9 +4620,26 @@ function wire() {
     localStorage.setItem(LS_UNIT_KEY, displayUnit);
     render();
   });
-  $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
+  async function robustSignOut() {
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) console.warn('[auth] signOut error:', error);
+    } catch (e) {
+      console.warn('[auth] signOut threw:', e);
+    }
+    // Belt-and-suspenders: clear any lingering Supabase auth storage and reload.
+    // If signOut succeeded, SIGNED_OUT will have fired already; the reload just
+    // guarantees the UI resets cleanly (e.g. if admin view state got stuck).
+    try {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sb-') && key.endsWith('-auth-token')) localStorage.removeItem(key);
+      }
+    } catch {}
+    window.location.href = '/';
+  }
+  $('#sign-out-btn').addEventListener('click', robustSignOut);
   const mobileSignOutBtn = $('#mobile-sign-out-btn');
-  if (mobileSignOutBtn) mobileSignOutBtn.addEventListener('click', () => supabase.auth.signOut());
+  if (mobileSignOutBtn) mobileSignOutBtn.addEventListener('click', robustSignOut);
 
   // Share-link landing: sign-up / sign-in forms + toggle + copy button.
   const shareSignup = $('#share-signup-form');
@@ -5125,6 +5160,27 @@ wire();
     if (session?.user) { cleanAuthParamsFromUrl(); await onSignedIn(session); }
     else if (pendingShareToken) {
       await showShareLandingWithPreview(pendingShareToken);
+      // If the user already submitted the share-landing form (localStorage
+      // has their name+email scoped to this token) and we just got dumped
+      // back here because verifyOtp failed on the magic-link click, prefill
+      // the form and show an explicit error so they can resend in one tap
+      // instead of seeing the same empty form and wondering what happened.
+      try {
+        const stashRaw = localStorage.getItem('pack.lastShareSubmit');
+        const stash = stashRaw ? JSON.parse(stashRaw) : null;
+        if (stash && stash.token === pendingShareToken) {
+          const emailEl = $('#share-signup-email');
+          const nameEl = $('#share-signup-name');
+          if (emailEl && stash.email) emailEl.value = stash.email;
+          if (nameEl && stash.name) nameEl.value = stash.name;
+        }
+      } catch {}
+      if (consumed?.error) {
+        setShareLandingStatus(
+          "That sign-in link didn't work — tap Join again to get a fresh one.",
+          'error',
+        );
+      }
     }
     else {
       if (pendingInviteToken) {
@@ -5274,7 +5330,10 @@ async function adminFetch(view, extra = {}) {
   });
   if (!res.ok) {
     let err = `HTTP ${res.status}`;
-    try { err = (await res.json())?.error || err; } catch {}
+    try {
+      const body = await res.json();
+      err = body?.reason ? `${body.error || err} (${body.reason})` : (body?.error || err);
+    } catch {}
     throw new Error(err);
   }
   return res.json();

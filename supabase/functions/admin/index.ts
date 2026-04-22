@@ -32,19 +32,29 @@ function json(body: unknown, status = 200) {
   });
 }
 
-async function requireAuth(req: Request): Promise<{ userId: string; token: string } | null> {
+type AuthResult =
+  | { ok: true; userId: string; token: string }
+  | { ok: false; reason: string };
+
+async function requireAuth(req: Request): Promise<AuthResult> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
-  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  if (!token) return { ok: false, reason: "no-bearer-token" };
+  if (!SUPABASE_URL) return { ok: false, reason: "no-supabase-url-env" };
+  if (!SUPABASE_ANON_KEY) return { ok: false, reason: "no-anon-key-env" };
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
       headers: { authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { ok: false, reason: `auth-user-${res.status}: ${body.slice(0, 120)}` };
+    }
     const user = await res.json();
-    return typeof user?.id === "string" ? { userId: user.id, token } : null;
-  } catch {
-    return null;
+    if (typeof user?.id !== "string") return { ok: false, reason: "user-no-id" };
+    return { ok: true, userId: user.id, token };
+  } catch (e) {
+    return { ok: false, reason: `fetch-threw: ${(e as Error).message}` };
   }
 }
 
@@ -348,7 +358,10 @@ Deno.serve(async (req) => {
   }
 
   const auth = await requireAuth(req);
-  if (!auth) return json({ error: "Unauthorized" }, 401);
+  if (!auth.ok) {
+    console.warn("[admin] auth rejected:", auth.reason);
+    return json({ error: "Unauthorized", reason: auth.reason }, 401);
+  }
 
   const admin = await isAdmin(auth.token);
   if (!admin) return json({ error: "Forbidden" }, 403);
