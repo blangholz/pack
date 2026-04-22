@@ -800,6 +800,19 @@ img.brand-badge-logo {
 .activity-item.drop-above::before { top: -4px; }
 .activity-item.drop-below::after { bottom: -4px; }
 
+/* Quantity-bump flash: played when the user re-drags a gear into a list
+   that already contains it, so the quantity tick is obviously tied to the
+   drop. Uses the accent color so it reads as "added" rather than
+   destructive. */
+@keyframes activity-item-flash-bump {
+  0%   { background-color: color-mix(in srgb, var(--accent) 35%, transparent); box-shadow: 0 0 0 2px var(--accent); }
+  60%  { background-color: color-mix(in srgb, var(--accent) 18%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent); }
+  100% { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+}
+.activity-item.flash-bump {
+  animation: activity-item-flash-bump 0.65s ease-out;
+}
+
 .activity-footer {
   border-top: 1px solid var(--border);
   background: var(--bg-elev);

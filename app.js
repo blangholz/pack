@@ -1397,6 +1397,23 @@ async function removeGearFromActivity(activityId, gearId) {
   render();
 }
 
+// Pulse the activity-item row for `gearId` so the user notices the quantity
+// bumped (otherwise re-dragging a gear looks like it did nothing). The
+// classList dance forces the animation to restart even when the flash class
+// is re-applied within its own animation window.
+function flashActivityItem(gearId) {
+  requestAnimationFrame(() => {
+    const row = document.querySelector(
+      `#activity-list .activity-item[data-gear-id="${CSS.escape(String(gearId))}"]`
+    );
+    if (!row) return;
+    row.classList.remove('flash-bump');
+    void row.offsetWidth; // force reflow so the animation replays
+    row.classList.add('flash-bump');
+    setTimeout(() => row.classList.remove('flash-bump'), 700);
+  });
+}
+
 async function addGearToActivity(activityId, gearId, insertIdx) {
   if (!activityId) return;
   const existing = itemsFor(activityId).find((i) => i.gear_id === gearId);
@@ -1406,6 +1423,7 @@ async function addGearToActivity(activityId, gearId, insertIdx) {
     if (error) { toast(error.message, 'error'); return; }
     existing.quantity = q;
     render();
+    flashActivityItem(gearId);
     return;
   }
   const items = itemsFor(activityId).slice();
@@ -4132,8 +4150,23 @@ async function consumeTokenHashFromUrl() {
   const token_hash = params.get('token_hash');
   const type = params.get('type');
   if (!token_hash || !type) return null;
+  const redirectToRaw = params.get('redirect_to');
   console.log('[auth] exchanging token_hash from URL, type=', type);
   const { data, error } = await supabase.auth.verifyOtp({ token_hash, type });
+  if (redirectToRaw) {
+    try {
+      const redirectUrl = new URL(redirectToRaw, window.location.origin);
+      const curr = new URL(window.location.href);
+      redirectUrl.searchParams.forEach((v, k) => {
+        if (k === 'token_hash' || k === 'type' || k === 'redirect_to') return;
+        curr.searchParams.set(k, v);
+      });
+      history.replaceState({}, '', curr.toString());
+    } catch (e) {
+      console.warn('[auth] could not parse redirect_to from magic link', e);
+    }
+  }
+  consumeInviteParamsFromUrl();
   cleanAuthParamsFromUrl();
   if (error) { console.warn('[auth] verifyOtp failed', error); return { error }; }
   return { session: data?.session || null };
