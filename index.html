@@ -232,8 +232,29 @@
           <p id="fetch-status" class="field-hint muted"></p>
         </div>
 
-        <!-- Section 3: Manual -->
-        <div class="section-label">③ Or edit details manually</div>
+        <!-- Section 3: Screenshot -->
+        <div class="section-label">③ Or drop a screenshot</div>
+        <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
+          <div class="dropzone-idle">
+            <div class="dropzone-icon">🖼️</div>
+            <div class="dropzone-title">Drop a product screenshot here</div>
+            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+          </div>
+          <div class="dropzone-preview hidden">
+            <img id="screenshot-preview" alt="Screenshot preview" />
+            <div class="dropzone-preview-row">
+              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
+                <span class="spinner-sm" aria-hidden="true"></span>
+                <span id="screenshot-status">Reading the screenshot…</span>
+              </div>
+              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+            </div>
+          </div>
+        </div>
+        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
+
+        <!-- Section 4: Manual -->
+        <div class="section-label">④ Or edit details manually</div>
         <div class="form-grid">
           <div class="field">
             <label for="gear-name">Name</label>
@@ -260,27 +281,6 @@
             <textarea id="gear-notes" rows="2" placeholder="Size M, red, bought 2025"></textarea>
           </div>
         </div>
-
-        <!-- Section 4: Screenshot (last — less common on mobile) -->
-        <div class="section-label">④ Or drop a screenshot</div>
-        <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
-          <div class="dropzone-idle">
-            <div class="dropzone-icon">🖼️</div>
-            <div class="dropzone-title">Drop a product screenshot here</div>
-            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
-          </div>
-          <div class="dropzone-preview hidden">
-            <img id="screenshot-preview" alt="Screenshot preview" />
-            <div class="dropzone-preview-row">
-              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
-                <span class="spinner-sm" aria-hidden="true"></span>
-                <span id="screenshot-status">Reading the screenshot…</span>
-              </div>
-              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
-            </div>
-          </div>
-        </div>
-        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
 
         <div class="gear-preview" id="gear-preview">
           <div class="gear-preview-img-wrap">
