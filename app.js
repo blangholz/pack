@@ -749,11 +749,14 @@ function activityItemRow(activity, item, gear) {
       )
     : null;
 
-  const weightLabel = gear.weight_grams == null
-    ? '—'
+  const weightEl = gear.weight_grams == null
+    ? h('div', { class: 'item-weight' }, '—')
     : (itemQty > 1
-        ? `${formatWeight(totalWeight)} (${itemQty}× ${formatWeight(gear.weight_grams)})`
-        : formatWeight(gear.weight_grams));
+        ? h('div', { class: 'item-weight' },
+            h('span', { class: 'item-weight-total' }, formatWeight(totalWeight)),
+            h('span', { class: 'item-weight-breakdown' }, `(${itemQty}× ${formatWeight(gear.weight_grams)})`),
+          )
+        : h('div', { class: 'item-weight' }, formatWeight(gear.weight_grams)));
 
   const row = h('div', {
     class: 'activity-item' + (item.packed ? ' packed' : ''),
@@ -780,7 +783,7 @@ function activityItemRow(activity, item, gear) {
       customChips,
       weatherChips,
     ),
-    h('div', { class: 'item-weight' }, weightLabel),
+    weightEl,
     h('button', {
       class: 'item-remove',
       title: 'Remove from this list',
@@ -1168,6 +1171,7 @@ function resetGearForm() {
   $('#fetch-status').textContent = '';
   resetScreenshotUI();
   resetGearSearchUI();
+  setIdentifyPhotoStatus(null);
   updateGearPreview();
 }
 
@@ -1618,7 +1622,7 @@ async function handleScreenshotFile(file) {
     setScreenshotState('preview');
     setScreenshotProgress('Reading the screenshot with Claude…');
     $('#fetch-status').textContent = '';
-    const res = await callExtractGear({ image: { base64, mediaType } });
+    const res = await callExtractGear({ image: { base64, mediaType }, mode: 'screenshot' });
     applyExtracted(res.data);
     setScreenshotProgress(null);
     $('#fetch-status').textContent = 'Filled in what we could see — review and save.';
@@ -1626,6 +1630,50 @@ async function handleScreenshotFile(file) {
     setScreenshotProgress(null);
     setScreenshotState($('#screenshot-preview').getAttribute('src') ? 'preview' : 'idle');
     $('#fetch-status').textContent = err.message || 'Could not read the screenshot.';
+  }
+}
+
+function setIdentifyPhotoStatus(text, isError = false) {
+  const el = $('#identify-photo-status');
+  if (!text) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    el.classList.remove('error');
+    return;
+  }
+  el.textContent = text;
+  el.classList.remove('hidden');
+  el.classList.toggle('error', !!isError);
+}
+
+async function handleGearPhotoFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  if ($('#gear-modal').classList.contains('hidden')) openAddGear();
+  const btn = $('#identify-photo-btn');
+  btn.disabled = true;
+  setIdentifyPhotoStatus('Identifying gear from your photo…');
+  try {
+    const { base64, mediaType } = await fileToResizedDataUrl(file);
+    const res = await callExtractGear({ image: { base64, mediaType }, mode: 'photo' });
+    const data = res.data || {};
+    applyExtracted(data);
+    if (!$('#gear-image').value) {
+      $('#gear-image').value = await fileToThumbnailDataUrl(file);
+      updateGearPreview();
+    }
+    if (data.name) {
+      const label = [data.brand, data.name].filter(Boolean).join(' ');
+      setIdentifyPhotoStatus(`Identified as ${label} — review the fields below and save.`);
+    } else {
+      setIdentifyPhotoStatus(
+        'Couldn\u2019t confidently identify this — please fill in the details below.',
+        true,
+      );
+    }
+  } catch (err) {
+    setIdentifyPhotoStatus(err.message || 'Could not identify the gear from that photo.', true);
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -1861,6 +1909,14 @@ function wire() {
     } catch (err) {
       toast(err.message || 'Could not process photo', 'error');
     }
+  });
+
+  // Identify gear from a photo (mobile) — sends to Claude vision in photo mode
+  $('#identify-photo-btn').addEventListener('click', () => $('#identify-photo-input').click());
+  $('#identify-photo-input').addEventListener('change', (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (f) handleGearPhotoFile(f);
   });
 
   // Screenshot dropzone inside gear modal
