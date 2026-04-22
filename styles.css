@@ -3017,17 +3017,14 @@ img.brand-badge-logo {
   color: var(--accent-text);
 }
 
-/* Inline share-link section that appears below the form fields after a
-   new list is created. Top border separates it from the name/email inputs
-   so the reveal reads as "new state" rather than "more form to fill". */
+/* Inline share-link section shown from the moment the new-activity modal
+   opens. Top border separates "share with anyone" from the name field
+   above it, so the share row reads as its own section rather than a
+   continuation of the form. */
 #activity-share-section {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
-}
-.activity-share-emails-note {
-  margin: 10px 0 0 0;
-  font-size: 12px;
 }
 
 /* Invite card inside the share-accept modal — stretch to panel width and

@@ -625,15 +625,11 @@
             <input id="activity-emoji" type="text" maxlength="4" class="activity-emoji-hidden" aria-hidden="true" tabindex="-1" />
             <p class="field-hint muted">We'll pick an emoji to match — click the emoji to change it.</p>
           </div>
-          <div id="activity-invite-field" class="field">
-            <label for="activity-invite-emails">Invite by email (optional)</label>
-            <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
-            <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
-          </div>
-
-          <!-- Inline share-link section. Hidden while entering the form in
-               New-list mode; revealed in place the moment the INSERT lands
-               so the user can grab the link without a follow-up view. -->
+          <!-- Share-by-link section. Shown from the moment the new-activity
+               modal opens (token is generated client-side), so the user can
+               grab the link without waiting for Save or a second screen.
+               Hidden in edit mode — existing lists use the share-glyph in
+               the modal header instead. -->
           <div id="activity-share-section" class="share-section share-link-section" hidden>
             <div class="share-section-label">Share with anyone</div>
             <div class="share-link-row">
@@ -653,7 +649,12 @@
               </button>
             </div>
             <p class="field-hint muted">Anyone with this link can join the list.</p>
-            <p class="activity-share-emails-note muted" id="activity-share-emails-note" hidden></p>
+          </div>
+
+          <div id="activity-invite-field" class="field">
+            <label for="activity-invite-emails">Invite by email (optional)</label>
+            <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
+            <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
           </div>
 
           <div id="activity-emoji-picker" class="emoji-picker-popover hidden" role="dialog" aria-label="Pick an emoji">
@@ -668,7 +669,6 @@
         <div class="spacer"></div>
         <button id="activity-cancel-btn" class="btn btn-ghost" data-close="activity-modal">Cancel</button>
         <button id="activity-save-btn" class="btn btn-primary">Save</button>
-        <button id="activity-done-btn" class="btn btn-primary hidden">Done</button>
       </footer>
     </div>
   </div>

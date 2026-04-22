@@ -2813,6 +2813,23 @@ async function handleGearPhotoFile(file) {
 // editing the name. Reset each time the modal opens.
 let activityEmojiAutoDerive = true;
 
+// Share-token staged by openNewActivity(), applied in handleSaveActivity()'s
+// new-list branch as an UPDATE against activity_share_links after the insert
+// trigger has created the row. Lets the share-link UI render with a live,
+// shareable URL the moment the modal opens — no second screen needed.
+let pendingNewActivityToken = null;
+
+// Mirrors the DB default for activity_share_links.token:
+//   encode(extensions.gen_random_bytes(24), 'base64')
+// 24 random bytes → 32 base64 chars, same shape the trigger would have picked.
+function generateShareToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
 function syncActivityEmojiDisplay() {
   const hidden = $('#activity-emoji');
   const display = $('#activity-emoji-display');
@@ -2835,22 +2852,13 @@ function resetActivityModalToFormView() {
   $('#activity-form-view').hidden = false;
   const shareSection = $('#activity-share-section');
   if (shareSection) shareSection.hidden = true;
-  const emailsNote = $('#activity-share-emails-note');
-  if (emailsNote) { emailsNote.hidden = true; emailsNote.textContent = ''; }
   const shareUrl = $('#activity-share-url');
   if (shareUrl) shareUrl.value = '';
   const shareCopy = $('#activity-share-copy');
   if (shareCopy) { shareCopy.disabled = true; shareCopy.textContent = 'Copy'; shareCopy.classList.remove('share-link-copied'); }
-  // Undo the post-create form lock so the next open starts editable again.
-  const nameInput = $('#activity-name');
-  if (nameInput) nameInput.readOnly = false;
-  const emailsInput = $('#activity-invite-emails');
-  if (emailsInput) emailsInput.readOnly = false;
-  const emojiBtn = $('#activity-emoji-btn');
-  if (emojiBtn) emojiBtn.disabled = false;
+  pendingNewActivityToken = null;
   $('#activity-save-btn').classList.remove('hidden');
   $('#activity-cancel-btn').classList.remove('hidden');
-  $('#activity-done-btn').classList.add('hidden');
 }
 
 function openNewActivity() {
@@ -2866,6 +2874,18 @@ function openNewActivity() {
   // Share glyph only makes sense on existing lists.
   $('#activity-modal-share-btn').classList.add('hidden');
   resetActivityModalToFormView();
+  // Pregenerate the share token so the user sees a real, copyable link the
+  // moment the modal opens. On Save we UPDATE the trigger-created row's
+  // token to match. If the user Cancels, the token never leaves the client.
+  pendingNewActivityToken = generateShareToken();
+  const shareSection = $('#activity-share-section');
+  if (shareSection) shareSection.hidden = false;
+  const shareUrl = $('#activity-share-url');
+  if (shareUrl) {
+    shareUrl.value = `${window.location.origin}/?share=${encodeURIComponent(pendingNewActivityToken)}`;
+  }
+  const shareCopy = $('#activity-share-copy');
+  if (shareCopy) shareCopy.disabled = false;
   activityEmojiAutoDerive = true;
   syncActivityEmojiDisplay();
   hideEmojiPicker();
@@ -2997,79 +3017,33 @@ async function handleSaveActivity() {
     }];
   }
   const emails = parseEmailList($('#activity-invite-emails').value);
+  // Rotate the trigger-inserted share-link row's token to the one the user
+  // already saw (and may have copied) in the form. RLS policy
+  // activity_share_links_update_owner permits this since they're the owner.
+  // Awaited so we don't close the modal while a just-copied link still
+  // resolves to the trigger's default token on the server — paste-before-
+  // save would otherwise 404.
+  if (pendingNewActivityToken) {
+    const { error: updateError } = await supabase
+      .from('activity_share_links')
+      .update({ token: pendingNewActivityToken })
+      .eq('activity_id', data.id);
+    if (updateError) console.warn('[share-link] token rotate failed', updateError);
+  }
+  pendingNewActivityToken = null;
+  hideModal('activity-modal');
   render();
   syncRealtimeSubscription();
-  // Fire email invites in the background while the user sees the success
-  // view. They don't need to wait for Resend to resolve before getting the
-  // share link in their clipboard.
+  // Fire email invites in the background. The modal is already closed; the
+  // user is on the new list. Re-render when fan-out finishes so member counts
+  // reflect the freshly invited pending rows.
   if (emails.length) {
     fanOutInvitesForNewActivity(data.id, emails).then(() => render());
-  }
-  // Morph the current view in place — no second screen. The form stays
-  // visible, a share-link row appears below, and the footer swaps to Done.
-  await revealShareSectionAfterCreate(data, emails);
-}
-
-// Morph the new-list modal into its post-create state without a view swap:
-// reveal the inline share-link section, swap the footer to a single Done
-// button, and lock the form fields so the user can't accidentally "re-create"
-// the same list. Name/emoji remain readable; editing after create goes
-// through the tab's edit pencil.
-async function revealShareSectionAfterCreate(activity, invitedEmails) {
-  $('#activity-modal-title').textContent = 'List created';
-  $('#activity-save-btn').classList.add('hidden');
-  $('#activity-cancel-btn').classList.add('hidden');
-  $('#activity-done-btn').classList.remove('hidden');
-  $('#activity-delete-btn').classList.add('hidden');
-  $('#activity-duplicate-btn').classList.add('hidden');
-  $('#activity-modal-share-btn').classList.add('hidden');
-
-  // Lock the form inputs so the user can't keep typing into a list that's
-  // already been created. Readonly (not disabled) keeps the text selectable.
-  const nameInput = $('#activity-name');
-  if (nameInput) nameInput.readOnly = true;
-  const emailsInput = $('#activity-invite-emails');
-  if (emailsInput) emailsInput.readOnly = true;
-  const emojiBtn = $('#activity-emoji-btn');
-  if (emojiBtn) emojiBtn.disabled = true;
-
-  const shareSection = $('#activity-share-section');
-  if (shareSection) shareSection.hidden = false;
-
-  const emailsNote = $('#activity-share-emails-note');
-  if (emailsNote) {
-    if (Array.isArray(invitedEmails) && invitedEmails.length) {
-      emailsNote.textContent = invitedEmails.length === 1
-        ? `Invite email sent to ${invitedEmails[0]}.`
-        : `Invite emails sent to ${invitedEmails.length} people.`;
-      emailsNote.hidden = false;
-    } else {
-      emailsNote.hidden = true;
-      emailsNote.textContent = '';
-    }
-  }
-
-  const input = $('#activity-share-url');
-  const copyBtn = $('#activity-share-copy');
-  if (input) input.value = 'Loading…';
-  if (copyBtn) { copyBtn.disabled = true; copyBtn.textContent = 'Copy'; copyBtn.classList.remove('share-link-copied'); }
-
-  const url = await fetchShareLinkUrl(activity.id);
-  if (input) input.value = url || '';
-  if (copyBtn) copyBtn.disabled = !url;
-  if (url && input) {
-    requestAnimationFrame(() => {
-      try { input.focus({ preventScroll: true }); input.select(); } catch {}
-    });
   }
 }
 
 function handleActivityShareCopy() {
   return copyShareLink($('#activity-share-url'), $('#activity-share-copy'));
-}
-
-function handleActivityDoneBtn() {
-  hideModal('activity-modal');
 }
 
 // Duplicate an activity and everything scoped to it: its custom filters,
@@ -4800,7 +4774,6 @@ function wire() {
   $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
   $('#activity-leave-btn').addEventListener('click', handleLeaveActivity);
   $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
-  $('#activity-done-btn').addEventListener('click', handleActivityDoneBtn);
   $('#activity-share-copy').addEventListener('click', handleActivityShareCopy);
   $('#share-accept-btn').addEventListener('click', handleShareAcceptConfirm);
   $('#share-accept-decline-btn').addEventListener('click', handleShareAcceptDecline);
