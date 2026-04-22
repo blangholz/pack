@@ -483,6 +483,32 @@
   <!-- Invite landing banner (when ?invite= URL is consumed) -->
   <div id="invite-banner" class="invite-banner hidden" role="status" aria-live="polite"></div>
 
+  <!-- Onboarding: capture display_name before a new user sees the app -->
+  <div id="onboarding-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel onboarding-panel" role="document">
+      <div class="onboarding-brand">⛰ <span>PackUpGear</span></div>
+      <h2 id="onboarding-title" class="onboarding-title">Welcome!</h2>
+      <p id="onboarding-sub" class="onboarding-sub">Just one quick step before you get to your packing list.</p>
+      <form id="onboarding-form" class="onboarding-form" novalidate>
+        <label for="onboarding-name" class="onboarding-label">What should we call you?</label>
+        <input
+          id="onboarding-name"
+          type="text"
+          name="display_name"
+          autocomplete="name"
+          autocapitalize="words"
+          required
+          maxlength="80"
+          placeholder="e.g. Ben"
+          class="onboarding-input"
+        />
+        <div id="onboarding-error" class="onboarding-error" role="alert" aria-live="polite"></div>
+        <button type="submit" id="onboarding-submit" class="btn btn-primary onboarding-submit">Let's go →</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Gear image preview (lightbox) — tapped from any thumbnail -->
   <div id="image-preview-modal" class="modal hidden image-preview-modal" role="dialog" aria-modal="true" aria-label="Image preview">
     <div class="modal-backdrop" data-close="image-preview-modal"></div>

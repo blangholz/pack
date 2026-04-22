@@ -151,9 +151,13 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "https://pack-mocha.vercel.app"
+site_url = "https://packupgear.com"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = [
+  "https://packupgear.com",
+  "https://packupgear.com/",
+  "https://www.packupgear.com",
+  "https://www.packupgear.com/",
   "https://pack-mocha.vercel.app",
   "https://pack-mocha.vercel.app/",
   "http://localhost:3000",
@@ -236,7 +240,7 @@ host = "smtp.resend.com"
 port = 465
 user = "resend"
 pass = "env(RESEND_API_KEY)"
-admin_email = "auth@packup.equipment"
+admin_email = "auth@packupgear.com"
 sender_name = "PackUp"
 
 # Uncomment to customize email template
@@ -250,7 +254,7 @@ sender_name = "PackUp"
 # prefetch the link and consume the single-use token before the real user
 # clicks it.
 [auth.email.template.magic_link]
-subject = "Your PackUp sign-in link"
+subject = "Sign in to PackUpGear"
 content_path = "./supabase/templates/magic_link.html"
 
 # Uncomment to customize notification email template
@@ -382,6 +386,17 @@ allow_dynamic_registration = false
 # Gateway cannot verify ES256-signed session JWTs used by this project, so we
 # skip verify_jwt here. The function is still protected by the anon apikey
 # requirement and does not touch user data — it only proxies to Claude.
+verify_jwt = false
+
+[functions.share-activity]
+# Same ES256 JWT issue as extract-gear. The function re-validates the caller's
+# token against auth.v1.user and enforces activity ownership before sending
+# invites or touching activity_members / activity_invites.
+verify_jwt = false
+
+[functions.accept-invite]
+# Same ES256 JWT issue as extract-gear. Validates the caller's session before
+# enrolling them as a member.
 verify_jwt = false
 
 [edge_runtime]
