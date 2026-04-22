@@ -1128,13 +1128,15 @@ function openActivityPicker(gearId) {
   }
   for (const a of activities) {
     const inList = itemsFor(a.id).some((i) => i.gear_id === gearId);
-    const row = h('button', {
-      class: 'activity-picker-row' + (inList ? ' in-list' : ''),
+    const main = h('button', {
+      class: 'activity-picker-main' + (inList ? ' in-list' : ''),
       type: 'button',
       onclick: async () => {
+        if (inList) return;
         hideModal('activity-picker');
         await addGearToActivity(a.id, gearId);
       },
+      'aria-disabled': inList ? 'true' : 'false',
     },
       h('span', { class: 'activity-picker-emoji' }, a.emoji || '🎒'),
       h('span', { class: 'activity-picker-name' }, a.name),
@@ -1142,6 +1144,20 @@ function openActivityPicker(gearId) {
         ? h('span', { class: 'activity-picker-badge' }, '✓ in list')
         : h('span', { class: 'activity-picker-add' }, '+'),
     );
+    const row = h('div', { class: 'activity-picker-row' + (inList ? ' in-list' : '') }, main);
+    if (inList) {
+      const removeBtn = h('button', {
+        class: 'activity-picker-remove',
+        type: 'button',
+        title: `Remove from ${a.name}`,
+        'aria-label': `Remove from ${a.name}`,
+        onclick: async () => {
+          hideModal('activity-picker');
+          await removeGearFromActivity(a.id, gearId);
+        },
+      }, '−');
+      row.appendChild(removeBtn);
+    }
     list.appendChild(row);
   }
   showModal('activity-picker');
