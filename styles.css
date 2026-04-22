@@ -66,6 +66,11 @@ input, textarea, select { font-family: inherit; }
 .muted { color: var(--text-muted); font-size: 12px; }
 .spacer { flex: 1; }
 
+/* Lock background scroll while a modal is open — prevents iOS Safari from
+   pushing the modal up when the on-screen keyboard appears. */
+body.modal-open { overflow: hidden; }
+body.modal-open #main-view { overflow: hidden; }
+
 /* ============ Auth view ============ */
 .auth-wrap {
   min-height: 100vh;
@@ -1389,20 +1394,6 @@ img.brand-badge-logo {
   .mobile-tab.active { color: var(--accent); }
   .mobile-tab-icon { font-size: 22px; line-height: 1; }
   .mobile-tab-label { font-weight: 500; letter-spacing: 0.02em; }
-  .mobile-tab-fab {
-    background: var(--accent);
-    color: var(--accent-text);
-    width: 40px;
-    height: 40px;
-    border-radius: 999px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 24px;
-    font-weight: 600;
-    box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
-    margin-top: -8px;
-  }
 
   /* Tighter content padding */
   .library-header { padding: 10px 12px 6px; }
@@ -1414,19 +1405,30 @@ img.brand-badge-logo {
 }
 
 @media (max-width: 600px) {
-  /* Modal goes full-screen on phones */
+  /* Modal goes full-screen on phones; dvh shrinks when the keyboard opens
+     so the header stays anchored at the top instead of being pushed off. */
   .modal { padding: 0; align-items: stretch; }
   .modal-panel {
     max-width: none;
-    max-height: 100vh;
-    height: 100vh;
+    max-height: 100dvh;
+    height: 100dvh;
     border-radius: 0;
     border: none;
   }
   .modal-narrow { max-width: none; }
-  .modal-header { padding: 12px 14px; }
-  .modal-body { padding: 12px 14px; }
-  .modal-footer { padding: 10px 14px; flex-wrap: wrap; }
+  .modal-header {
+    padding: 12px 14px;
+    flex-shrink: 0;
+    background: var(--bg-elev);
+  }
+  .modal-body { padding: 12px 14px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+  .modal-footer { padding: 10px 14px; flex-wrap: wrap; flex-shrink: 0; }
+
+  /* Compact screenshot dropzone — less common on phones */
+  .screenshot-dropzone-compact { min-height: 100px; padding: 14px; }
+  .screenshot-dropzone-compact .dropzone-icon { font-size: 26px; }
+  .screenshot-dropzone-compact .dropzone-title { font-size: 13px; }
+  .screenshot-dropzone-compact .dropzone-sub { font-size: 11px; }
   /* 16px inputs prevent iOS zoom-on-focus */
   .field input[type="text"],
   .field input[type="url"],

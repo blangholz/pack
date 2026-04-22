@@ -1104,8 +1104,16 @@ function handleRemoveDropzone() {
 // ------------------------------------------------------------------
 // Modals
 // ------------------------------------------------------------------
-function showModal(id) { $('#' + id).classList.remove('hidden'); }
-function hideModal(id) { $('#' + id).classList.add('hidden'); }
+function showModal(id) {
+  $('#' + id).classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+function hideModal(id) {
+  $('#' + id).classList.add('hidden');
+  if (!document.querySelector('.modal:not(.hidden)')) {
+    document.body.classList.remove('modal-open');
+  }
+}
 
 // ------------------------------------------------------------------
 // Activity picker (mobile per-card "+" → choose which list)
@@ -1230,7 +1238,8 @@ function updateGearPreview() {
 function openAddGear() {
   resetGearForm();
   showModal('gear-modal');
-  requestAnimationFrame(() => $('#gear-search-input').focus());
+  // Focus synchronously inside the user gesture so iOS Safari brings up the keyboard.
+  $('#gear-search-input').focus();
 }
 
 function openEditGear(id) {
@@ -1669,9 +1678,6 @@ function wire() {
   for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-mode]')) {
     tab.addEventListener('click', () => setMobileMode(tab.dataset.mobileMode));
   }
-  for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-action="add-gear"]')) {
-    tab.addEventListener('click', openAddGear);
-  }
 
   // Activity picker — "+ New packing list" jumps to packing tab and opens new-activity modal
   $('#activity-picker-new').addEventListener('click', () => {
@@ -1809,7 +1815,10 @@ function wire() {
     el.addEventListener('click', () => hideModal(el.dataset.close));
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') $$('.modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+    if (e.key === 'Escape') {
+      $$('.modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+      document.body.classList.remove('modal-open');
+    }
   });
 
   // Screenshot dropzone inside gear modal
