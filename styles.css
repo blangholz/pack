@@ -1531,6 +1531,10 @@ img.brand-badge-logo {
   .library-header { padding: 10px 12px 6px; }
   .gear-search { margin: 0 12px 8px; }
   .gear-list { padding: 4px 12px 16px; }
+  /* Hide the brand-filter strip on phones until the user engages search or
+     an active brand is already selected — keeps the list dense by default. */
+  .gear-library .brand-filter-pills:not(.has-active) { display: none; }
+  .gear-library.search-active .brand-filter-pills:not(.hidden) { display: flex; }
   .activity-tabs {
     padding: 10px 12px;
     gap: 8px;

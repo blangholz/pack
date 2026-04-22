@@ -429,9 +429,11 @@ function renderBrandFilters() {
 
   if (counts.size < 2) {
     host.classList.add('hidden');
+    host.classList.remove('has-active');
     return;
   }
   host.classList.remove('hidden');
+  host.classList.toggle('has-active', !!brandFilter);
 
   const entries = Array.from(counts.entries()).sort((a, b) => b[1].count - a[1].count);
   for (const [key, { label, count }] of entries) {
@@ -1837,10 +1839,20 @@ function wire() {
   });
 
   // Gear search
-  $('#gear-search').addEventListener('input', (e) => {
+  const gearSearchInput = $('#gear-search');
+  const gearLibraryAside = document.querySelector('.gear-library');
+  const syncSearchActive = () => {
+    if (!gearLibraryAside) return;
+    const active = document.activeElement === gearSearchInput || gearSearchInput.value.trim().length > 0;
+    gearLibraryAside.classList.toggle('search-active', active);
+  };
+  gearSearchInput.addEventListener('input', (e) => {
     gearSearchQuery = e.target.value;
+    syncSearchActive();
     renderLibrary();
   });
+  gearSearchInput.addEventListener('focus', syncSearchActive);
+  gearSearchInput.addEventListener('blur', syncSearchActive);
 
   // Library edit mode
   $('#library-edit-toggle').addEventListener('click', () => {
