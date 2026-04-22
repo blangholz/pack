@@ -254,7 +254,10 @@ let realtimeChannelActivityId = null;
 let globalItemsChannel = null;        // listens to all activity_items inserts so non-active tab badges update live
 let shareModalActivityId = null;
 let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
+let pendingShareToken = null;         // consumed from ?share= on boot, applied after sign-in
 let pendingOpenActivityId = null;     // consumed from ?activity= on boot, applied after sign-in
+let shareLandingLoaded = false;       // guard so we only fetch the preview once per page load
+let currentShareLinkToken = null;     // token for the active share modal's copy-link row
 // onSignedIn fires from multiple code paths (boot IIFE, auth state change,
 // token-hash verify). Guard against concurrent/duplicate runs per user so we
 // don't seed defaults twice or re-run loadAll uselessly.
@@ -402,12 +405,19 @@ function toast(message, kind = '') {
 // Auth view / main view toggling
 // ------------------------------------------------------------------
 function showAuth() {
+  $('#share-landing-view').hidden = true;
   $('#auth-view').hidden = false;
   $('#main-view').hidden = true;
 }
 function showMain() {
+  $('#share-landing-view').hidden = true;
   $('#auth-view').hidden = true;
   $('#main-view').hidden = false;
+}
+function showShareLanding() {
+  $('#share-landing-view').hidden = false;
+  $('#auth-view').hidden = true;
+  $('#main-view').hidden = true;
 }
 
 function setAuthStatus(msg, kind) {
@@ -487,6 +497,7 @@ async function loadAll() {
   setStatus('');
   render();
   syncRealtimeSubscription();
+  setupGlobalItemsRealtime();
   // Whatever the user lands on at boot, mark it as seen so the badge there
   // clears immediately on next render.
   if (activeActivityId) markActivitySeen(activeActivityId);
@@ -3123,6 +3134,59 @@ async function syncRealtimeSubscription() {
   realtimeChannel = channel;
 }
 
+// Listens to activity_items changes across EVERY activity the user can see (RLS
+// gates membership). The per-activity channel above only carries the active
+// tab; this one keeps the unread badge on inactive tabs live so the user
+// doesn't need to refresh to see "the climbing tab has 3 new items".
+async function setupGlobalItemsRealtime() {
+  if (globalItemsChannel) {
+    try { supabase.removeChannel(globalItemsChannel); } catch {}
+    globalItemsChannel = null;
+  }
+  if (!currentUser) return;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (token && typeof supabase.realtime?.setAuth === 'function') {
+      supabase.realtime.setAuth(token);
+    }
+  } catch (err) {
+    console.warn('[realtime] setAuth failed (global)', err);
+  }
+  globalItemsChannel = supabase
+    .channel('items-global')
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'activity_items' },
+      (payload) => onGlobalItemsChange(payload))
+    .subscribe((status, err) => {
+      console.log(`[realtime] channel items-global status=${status}`, err || '');
+    });
+}
+
+async function onGlobalItemsChange(payload) {
+  const aid = payload.new?.activity_id || payload.old?.activity_id;
+  if (!aid) return;
+  // Active tab is owned by the per-activity channel; skipping here keeps us
+  // from double-applying the same event.
+  if (aid === activeActivityId) return;
+  const items = itemsByActivity[aid] || (itemsByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (items.some((i) => i.id === payload.new.id)) return;
+    items.push(payload.new);
+    if (payload.new.gear_id && !getGearById(payload.new.gear_id)) {
+      await loadForeignGear();
+      await loadCoMemberProfiles();
+    }
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = items.findIndex((i) => i.id === payload.new.id);
+    if (idx >= 0) items[idx] = payload.new;
+    else items.push(payload.new);
+  } else if (payload.eventType === 'DELETE') {
+    itemsByActivity[aid] = items.filter((i) => i.id !== payload.old.id);
+  }
+  renderTabs();
+}
+
 async function onRealtimeItemChange(aid, payload) {
   console.log('[realtime] item change', payload.eventType, payload.new?.id || payload.old?.id);
   const items = itemsByActivity[aid] || (itemsByActivity[aid] = []);
@@ -3637,6 +3701,9 @@ function wire() {
   dz.addEventListener('drop', (e) => {
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
+    // Stop here so the window-level drop listener doesn't also process the
+    // same files (which would double-enqueue them).
+    e.stopPropagation();
     dz.classList.remove('drag-over');
     const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
     if (fs.length) enqueuePhotos(fs, { mode: 'auto' });
@@ -3678,9 +3745,11 @@ function wire() {
     e.preventDefault();
     dragDepth = 0;
     overlay.classList.remove('active');
-    // When the gear modal is open, the in-modal dropzone handles drops.
-    // Skipping here prevents double-processing (event bubbles to window).
-    if (!$('#gear-modal').classList.contains('hidden')) return;
+    // If the drop landed on the in-modal dropzone, that handler has already
+    // called stopPropagation and enqueued the files — this listener won't
+    // fire for those. Any other drop on the page (or anywhere inside the
+    // open modal) falls through to here so the whole window is a drop
+    // target.
     const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
     if (fs.length === 0) return;
     enqueuePhotos(fs, { mode: 'auto' });
@@ -3767,6 +3836,8 @@ function onSignedOut() {
   if (realtimeChannel) { try { supabase.removeChannel(realtimeChannel); } catch {} }
   realtimeChannel = null;
   realtimeChannelActivityId = null;
+  if (globalItemsChannel) { try { supabase.removeChannel(globalItemsChannel); } catch {} }
+  globalItemsChannel = null;
   const banner = $('#invite-banner');
   if (banner) banner.classList.add('hidden');
   showAuth();
