@@ -455,49 +455,42 @@ function renderBrandFilters() {
 }
 
 function gearCard(gear) {
-  const img = gearImageEl(gear.image_url);
+  const imgNode = gearImageEl(gear.image_url);
+  const imgWrap = gear.url
+    ? h('a', {
+        class: 'gear-image-link',
+        href: gear.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        title: 'Open product page',
+        'aria-label': `Open ${gear.name || 'product'} page`,
+        onclick: (e) => e.stopPropagation(),
+        ondragstart: (e) => e.preventDefault(),
+      }, imgNode)
+    : imgNode;
   const weight = h('div', { class: 'gear-weight' }, formatWeight(gear.weight_grams));
   const badge = brandBadgeEl(gear.brand);
   const ownedQty = Number.isFinite(gear.quantity) && gear.quantity >= 1 ? gear.quantity : 1;
   const qtyBadge = ownedQty > 1
     ? h('div', { class: 'gear-qty-badge', title: `You own ${ownedQty}` }, `×${ownedQty}`)
     : null;
-  const addBtn = h('button', {
-    class: 'gear-card-add-touch',
-    type: 'button',
-    title: 'Add to a packing list',
-    'aria-label': 'Add to a packing list',
-    onclick: (e) => {
-      e.stopPropagation();
-      openActivityPicker(gear.id);
-    },
-  }, '+');
-  const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight, addBtn);
+  const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight);
 
   const meta = h('div', { class: 'gear-meta' },
     h('div', { class: 'gear-name' }, gear.name || 'Unnamed'),
-    h('div', { class: 'gear-sub' },
-      gear.brand ? h('span', {}, gear.brand) : null,
-      gear.url ? h('a', {
-        href: gear.url,
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        class: 'gear-sub-link',
-        onclick: (e) => e.stopPropagation(),
-        ondragstart: (e) => e.preventDefault(),
-      }, escapeHost(gear.url) || 'link') : null,
-    ),
+    gear.brand ? h('div', { class: 'gear-sub' }, gear.brand) : null,
   );
 
   const cardProps = { class: 'gear-card', dataset: { gearId: gear.id } };
   if (!libraryEditMode) {
     cardProps.draggable = 'true';
-    cardProps.onclick = () => openEditGear(gear.id);
+    cardProps.onclick = () => openActivityPicker(gear.id);
+    cardProps.title = 'Tap to add to a packing list';
     cardProps.ondragstart = (e) => handleGearDragStart(e, gear.id);
     cardProps.ondragend = handleDragEnd;
   }
 
-  const children = [img, meta, right];
+  const children = [imgWrap, meta, right];
   if (libraryEditMode) {
     const actions = h('div', { class: 'gear-card-actions' },
       h('button', {
