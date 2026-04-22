@@ -2856,6 +2856,11 @@ function openShareModal(activityId) {
   $('#share-leave-btn').classList.toggle('hidden', isOwnerOf(activityId));
   renderShareModal();
   showModal('share-modal');
+  // Kick off the share-link fetch; it populates (or hides) the top section
+  // independently of the rest of the modal.
+  loadShareLinkForModal(activityId).catch((err) => {
+    console.warn('[share-link] load failed', err);
+  });
   requestAnimationFrame(() => {
     if (isOwnerOf(activityId)) $('#share-invite-email').focus();
   });
@@ -3283,6 +3288,37 @@ async function applyPendingInvite() {
   }
 }
 
+async function applyPendingShareToken() {
+  if (!pendingShareToken || !currentUser) return;
+  const token = pendingShareToken;
+  pendingShareToken = null;
+  showInviteBanner('Joining packing list…');
+  const { data, error } = await callEdgeFunction('accept-share-link', { token });
+  if (error) {
+    showInviteBanner(error, { kind: 'error', autoHide: 6000 });
+    return;
+  }
+  if (data?.activity_name || data?.inviter_name) {
+    onboardingContext = {
+      activityName: data.activity_name || null,
+      activityEmoji: data.activity_emoji || null,
+      inviterName: data.inviter_name || null,
+    };
+  }
+  await loadAll();
+  if (data?.activity_id) {
+    activeActivityId = data.activity_id;
+    render();
+    syncRealtimeSubscription();
+    markActivitySeen(data.activity_id);
+    const a = activities.find((x) => x.id === data.activity_id);
+    showInviteBanner(
+      `Welcome! You're packing "${a?.name || 'this list'}" together.`,
+      { autoHide: 4500 },
+    );
+  }
+}
+
 function applyPendingOpenActivity() {
   if (!pendingOpenActivityId) return;
   const id = pendingOpenActivityId;
@@ -3412,9 +3448,244 @@ function consumeInviteParamsFromUrl() {
   let changed = false;
   const inv = url.searchParams.get('invite');
   if (inv) { pendingInviteToken = inv; url.searchParams.delete('invite'); changed = true; }
+  const shr = url.searchParams.get('share');
+  if (shr) { pendingShareToken = shr; url.searchParams.delete('share'); changed = true; }
   const act = url.searchParams.get('activity');
   if (act) { pendingOpenActivityId = act; url.searchParams.delete('activity'); changed = true; }
   if (changed) history.replaceState({}, '', url.toString());
+}
+
+// ------------------------------------------------------------------
+// Share-link invite landing (shown when ?share=<token> + not signed in).
+// ------------------------------------------------------------------
+
+async function callPublicEdgeFunction(name, body) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    let json;
+    try { json = await res.json(); } catch { json = {}; }
+    if (!res.ok) return { error: json?.error || `HTTP ${res.status}`, status: res.status };
+    return { data: json };
+  } catch (err) {
+    return { error: err?.message || 'Network error' };
+  }
+}
+
+async function showShareLandingWithPreview(token) {
+  showShareLanding();
+  if (shareLandingLoaded) return;
+  shareLandingLoaded = true;
+
+  const loading = $('#share-landing-loading');
+  const bodyEl = $('#share-landing-body');
+  const invalid = $('#share-landing-invalid');
+  loading.hidden = false;
+  bodyEl.hidden = true;
+  invalid.hidden = true;
+
+  const { data, error, status } = await callPublicEdgeFunction('share-link-preview', { token });
+  loading.hidden = true;
+
+  if (error || !data) {
+    if (status === 404 || /not_found/i.test(error || '')) {
+      invalid.hidden = false;
+    } else {
+      invalid.hidden = false;
+      const para = invalid.querySelector('.muted');
+      if (para) para.textContent = error || 'Something went wrong loading this invite.';
+    }
+    return;
+  }
+
+  renderShareLandingPreview(data);
+  bodyEl.hidden = false;
+}
+
+function renderShareLandingPreview(data) {
+  const inviter = (data?.inviter_name || '').trim() || 'A friend';
+  const emoji = (data?.activity_emoji || '').trim();
+  const name = (data?.activity_name || '').trim() || 'this packing list';
+  $('#share-landing-inviter').textContent = inviter;
+  $('#share-landing-activity').textContent = emoji ? `${emoji} ${name}` : name;
+
+  const itemsUl = $('#share-landing-items');
+  itemsUl.innerHTML = '';
+  const items = Array.isArray(data.items_preview) ? data.items_preview : [];
+  for (const item of items) {
+    itemsUl.appendChild(
+      h('li', { class: 'invite-preview-row' },
+        item.image_url
+          ? h('img', { class: 'invite-preview-img', src: item.image_url, alt: '', loading: 'lazy' })
+          : h('div', { class: 'invite-preview-img invite-preview-img-placeholder', 'aria-hidden': 'true' }, '🎒'),
+        h('div', { class: 'invite-preview-text' },
+          h('div', { class: 'invite-preview-name' }, item.name || 'Gear'),
+          item.brand ? h('div', { class: 'invite-preview-brand' }, item.brand) : null,
+        ),
+      )
+    );
+  }
+
+  const more = Math.max(0, data?.more_count || 0);
+  const moreEl = $('#share-landing-more');
+  if (more > 0) {
+    moreEl.textContent = `+ ${more} more item${more === 1 ? '' : 's'}`;
+    moreEl.hidden = false;
+  } else {
+    moreEl.hidden = true;
+  }
+}
+
+function setShareLandingStatus(msg, kind) {
+  const el = $('#share-landing-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.classList.toggle('error', kind === 'error');
+  el.classList.toggle('ok', kind === 'ok');
+}
+
+function toggleShareLandingMode(mode) {
+  const signup = $('#share-signup-form');
+  const signin = $('#share-signin-form');
+  const toggle = $('#share-landing-signin-toggle');
+  if (mode === 'signin') {
+    signup.hidden = true;
+    signin.hidden = false;
+    if (toggle) toggle.parentElement.style.display = 'none';
+    setTimeout(() => $('#share-signin-email').focus(), 0);
+  } else {
+    signup.hidden = false;
+    signin.hidden = true;
+    if (toggle) toggle.parentElement.style.display = '';
+  }
+  setShareLandingStatus('', '');
+}
+
+async function handleShareSignupSubmit(e) {
+  e.preventDefault();
+  if (!pendingShareToken) return;
+  const first = $('#share-signup-first').value.trim();
+  const last = $('#share-signup-last').value.trim();
+  const email = $('#share-signup-email').value.trim();
+  if (!first || !last || !email) return;
+  const fullName = `${first} ${last}`;
+  const btn = $('#share-signup-submit');
+  btn.disabled = true;
+  setShareLandingStatus('Sending your magic link…');
+  const redirectTo = `${window.location.origin}/?share=${encodeURIComponent(pendingShareToken)}`;
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: {
+      emailRedirectTo: redirectTo,
+      shouldCreateUser: true,
+      data: { full_name: fullName },
+    },
+  });
+  btn.disabled = false;
+  if (error) {
+    setShareLandingStatus(`Could not send: ${error.message}`, 'error');
+    return;
+  }
+  setShareLandingStatus(
+    `Check ${email} — tap the link to join the list. You can close this tab.`,
+    'ok',
+  );
+}
+
+async function handleShareSigninSubmit(e) {
+  e.preventDefault();
+  if (!pendingShareToken) return;
+  const email = $('#share-signin-email').value.trim();
+  if (!email) return;
+  const btn = $('#share-signin-submit');
+  btn.disabled = true;
+  setShareLandingStatus('Sending sign-in link…');
+  const redirectTo = `${window.location.origin}/?share=${encodeURIComponent(pendingShareToken)}`;
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: redirectTo, shouldCreateUser: false },
+  });
+  btn.disabled = false;
+  if (error) {
+    const msg = /signups not allowed|user not found|not_found/i.test(error.message)
+      ? `No account for ${email}. Switch to sign up to create one.`
+      : `Could not send: ${error.message}`;
+    setShareLandingStatus(msg, 'error');
+    return;
+  }
+  setShareLandingStatus(
+    `Check ${email} — tap the link to sign in. You can close this tab.`,
+    'ok',
+  );
+}
+
+// ------------------------------------------------------------------
+// Share modal: Copy link row.
+// ------------------------------------------------------------------
+
+async function loadShareLinkForModal(activityId) {
+  const section = $('#share-link-section');
+  const input = $('#share-link-url');
+  const copyBtn = $('#share-link-copy');
+  currentShareLinkToken = null;
+  if (!section || !input) return;
+  input.value = 'Loading…';
+  if (copyBtn) copyBtn.disabled = true;
+
+  const { data, error } = await supabase
+    .from('activity_share_links')
+    .select('token')
+    .eq('activity_id', activityId)
+    .maybeSingle();
+
+  if (error || !data?.token) {
+    // Hide the section cleanly if we can't read it (e.g. backfill missed, or
+    // a race with a just-inserted activity).
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  currentShareLinkToken = data.token;
+  const url = `${window.location.origin}/?share=${encodeURIComponent(data.token)}`;
+  input.value = url;
+  if (copyBtn) {
+    copyBtn.disabled = false;
+    copyBtn.textContent = 'Copy';
+    copyBtn.classList.remove('share-link-copied');
+  }
+}
+
+async function handleShareLinkCopy() {
+  const input = $('#share-link-url');
+  const btn = $('#share-link-copy');
+  if (!input || !btn || !input.value) return;
+  const url = input.value;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(url);
+    copied = true;
+  } catch {
+    try {
+      input.select();
+      input.setSelectionRange(0, url.length);
+      copied = document.execCommand('copy');
+    } catch {}
+  }
+  if (copied) {
+    btn.textContent = '✓ Link copied';
+    btn.classList.add('share-link-copied');
+    setTimeout(() => {
+      btn.textContent = 'Copy';
+      btn.classList.remove('share-link-copied');
+    }, 2000);
+  } else {
+    btn.textContent = 'Press ⌘C';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2500);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -3461,6 +3732,18 @@ function wire() {
     $('#auth-chooser').hidden = false;
     setAuthStatus('');
   });
+
+  // Share-link landing: sign-up / sign-in forms + toggle + copy button.
+  const shareSignup = $('#share-signup-form');
+  if (shareSignup) shareSignup.addEventListener('submit', handleShareSignupSubmit);
+  const shareSignin = $('#share-signin-form');
+  if (shareSignin) shareSignin.addEventListener('submit', handleShareSigninSubmit);
+  const shareToggle = $('#share-landing-signin-toggle');
+  if (shareToggle) shareToggle.addEventListener('click', () => toggleShareLandingMode('signin'));
+  const shareBack = $('#share-signin-back-btn');
+  if (shareBack) shareBack.addEventListener('click', () => toggleShareLandingMode('signup'));
+  const copyBtn = $('#share-link-copy');
+  if (copyBtn) copyBtn.addEventListener('click', handleShareLinkCopy);
 
   // Sign up form (new user) — collects name + email, sends magic link
   $('#signup-form').addEventListener('submit', async (e) => {
@@ -3810,6 +4093,7 @@ async function onSignedIn(session) {
     }
   }
   await applyPendingInvite();
+  await applyPendingShareToken();
   applyPendingOpenActivity();
   syncRealtimeSubscription();
   await maybePromptForOnboarding();
@@ -3892,6 +4176,9 @@ wire();
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error) console.warn('[auth] getSession error', error);
     if (session?.user) { cleanAuthParamsFromUrl(); await onSignedIn(session); }
+    else if (pendingShareToken) {
+      await showShareLandingWithPreview(pendingShareToken);
+    }
     else {
       if (pendingInviteToken) {
         setAuthStatus(

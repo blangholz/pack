@@ -8,6 +8,122 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Share-link landing view (shown when ?share=<token> + not signed in) -->
+  <section id="share-landing-view" class="auth-wrap" hidden>
+    <div class="auth-decor" aria-hidden="true">
+      <span class="auth-decor-item" style="top:10%;  left:8%;  font-size:56px;">🏔</span>
+      <span class="auth-decor-item" style="top:22%;  right:10%; font-size:44px;">🪂</span>
+      <span class="auth-decor-item" style="top:44%;  left:5%;  font-size:34px;">🎒</span>
+      <span class="auth-decor-item" style="top:60%;  right:6%; font-size:38px;">🪢</span>
+      <span class="auth-decor-item" style="bottom:14%; left:14%; font-size:46px;">🧗</span>
+      <span class="auth-decor-item" style="bottom:8%;  right:10%; font-size:50px;">⛺</span>
+    </div>
+    <div class="auth-stack">
+      <div class="brand" style="justify-content: center;">
+        <span class="brand-mark">⛰</span>
+        <h1>PackUpGear</h1>
+      </div>
+      <h2 class="auth-hero">Gear up.<br>Get out.</h2>
+
+      <!-- Invitation card: who, what, preview -->
+      <div id="share-landing-card" class="invite-card" aria-live="polite">
+        <!-- Skeleton while share-link-preview is loading -->
+        <div id="share-landing-loading" class="invite-loading">
+          <div class="invite-skeleton invite-skeleton-headline"></div>
+          <div class="invite-skeleton invite-skeleton-row"></div>
+          <div class="invite-skeleton invite-skeleton-row"></div>
+          <div class="invite-skeleton invite-skeleton-row"></div>
+        </div>
+        <div id="share-landing-body" hidden>
+          <p class="invite-kicker">
+            <span id="share-landing-inviter">A friend</span> invited you to pack
+          </p>
+          <h3 id="share-landing-activity" class="invite-activity">—</h3>
+          <ul id="share-landing-items" class="invite-preview-list"></ul>
+          <p id="share-landing-more" class="invite-more muted" hidden></p>
+        </div>
+        <div id="share-landing-invalid" class="invite-invalid" hidden>
+          <p><strong>This invite link isn't valid.</strong></p>
+          <p class="muted">It may have been revoked or the list deleted.</p>
+          <a class="btn btn-secondary" href="/">Go to PackUpGear →</a>
+        </div>
+      </div>
+
+      <p class="auth-subhero share-landing-pitch">
+        Track your gear. Build packing lists for every adventure.
+      </p>
+
+      <div class="auth-card share-landing-auth">
+        <!-- Sign up (default) -->
+        <form id="share-signup-form" class="auth-form">
+          <div class="invite-name-row">
+            <div class="invite-name-field">
+              <label for="share-signup-first">First name</label>
+              <input
+                id="share-signup-first"
+                type="text"
+                autocomplete="given-name"
+                autocapitalize="words"
+                maxlength="40"
+                required
+                placeholder="Ben"
+              />
+            </div>
+            <div class="invite-name-field">
+              <label for="share-signup-last">Last name</label>
+              <input
+                id="share-signup-last"
+                type="text"
+                autocomplete="family-name"
+                autocapitalize="words"
+                maxlength="40"
+                required
+                placeholder="Langholz"
+              />
+            </div>
+          </div>
+          <label for="share-signup-email">Email</label>
+          <input
+            id="share-signup-email"
+            type="email"
+            autocomplete="email"
+            inputmode="email"
+            required
+            placeholder="you@example.com"
+          />
+          <button type="submit" id="share-signup-submit" class="btn btn-primary auth-cta">
+            Join the packing list →
+          </button>
+        </form>
+
+        <!-- Sign in (toggled) -->
+        <form id="share-signin-form" class="auth-form" hidden>
+          <button type="button" id="share-signin-back-btn" class="btn-link auth-back">← Back to sign up</button>
+          <label for="share-signin-email">Email</label>
+          <input
+            id="share-signin-email"
+            type="email"
+            autocomplete="email"
+            inputmode="email"
+            required
+            placeholder="you@example.com"
+          />
+          <button type="submit" id="share-signin-submit" class="btn btn-primary auth-cta">
+            Send sign-in link →
+          </button>
+        </form>
+
+        <div class="auth-divider share-landing-toggle">
+          <button type="button" id="share-landing-signin-toggle" class="btn-link">
+            Already have an account? Sign in →
+          </button>
+        </div>
+
+        <p id="share-landing-status" class="auth-status muted" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
   <!-- Auth view -->
   <section id="auth-view" class="auth-wrap" hidden>
     <div class="auth-decor" aria-hidden="true">
@@ -453,8 +569,29 @@
       <div class="modal-body">
         <p id="share-modal-subtitle" class="muted share-modal-subtitle"></p>
 
+        <div id="share-link-section" class="share-section share-link-section">
+          <div class="share-section-label">Share with anyone</div>
+          <div class="share-link-row">
+            <input
+              id="share-link-url"
+              class="share-link-url"
+              type="text"
+              readonly
+              aria-label="Invite link"
+            />
+            <button
+              id="share-link-copy"
+              class="btn btn-primary share-link-copy"
+              type="button"
+            >
+              Copy
+            </button>
+          </div>
+          <p class="field-hint muted">Anyone with this link can join the list.</p>
+        </div>
+
         <div class="share-section">
-          <div class="share-section-label">Invite by email</div>
+          <div class="share-section-label">Or invite by email</div>
           <form id="share-invite-form" class="share-invite-form" autocomplete="off">
             <input id="share-invite-email" type="email" inputmode="email" autocomplete="email" placeholder="friend@example.com" required />
             <button id="share-invite-submit" class="btn btn-primary" type="submit">Send invite</button>

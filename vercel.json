@@ -1,4 +1,10 @@
 {
   "buildCommand": "node build-env.mjs",
-  "outputDirectory": "."
+  "outputDirectory": ".",
+  "crons": [
+    {
+      "path": "/api/cron-digest",
+      "schedule": "0 17 * * *"
+    }
+  ]
 }

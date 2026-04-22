@@ -399,6 +399,22 @@ verify_jwt = false
 # enrolling them as a member.
 verify_jwt = false
 
+[functions.share-link-preview]
+# Intentionally anonymous — the share token itself is the capability. No auth
+# required so an invitee can see who's inviting them and what list before
+# they've signed up.
+verify_jwt = false
+
+[functions.accept-share-link]
+# Same ES256 JWT issue as extract-gear. Validates the caller's session before
+# enrolling them as a member via the share-link token.
+verify_jwt = false
+
+[functions.digest-emails]
+# Service-only cron endpoint — gated by DIGEST_CRON_SECRET, not user JWTs.
+# verify_jwt = false because the caller is a Vercel cron, not a signed-in user.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

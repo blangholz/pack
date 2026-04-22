@@ -3,9 +3,11 @@
 //
 // Request body (JSON):
 //   { "url": "https://…" }  OR
-//   { "image": { "base64": "…", "mediaType": "image/png" } }
+//   { "image": { "base64": "…", "mediaType": "image/png" }, "mode"?: "screenshot" | "photo", "forceMultiple"?: boolean }
 //
-// Response body (JSON): { name, brand, weightGrams, url, imageUrl, notes }
+// Response body (JSON):
+//   { data: { name, brand, weightGrams, url, imageUrl, notes, quantity } }
+//   For mode=photo: { data, confidence: 'high'|'medium'|'low', candidates: [...] }
 //
 // Auth: the Supabase gateway can't verify this project's ES256 JWTs, so
 // verify_jwt is off in config.toml. We instead call the Supabase auth API
@@ -93,29 +95,41 @@ Once you've identified the product, use your general knowledge about that specif
 async function callClaude(messages: any[], maxTokens = 800, tools?: any[]) {
   const body: Record<string, unknown> = { model: MODEL, max_tokens: maxTokens, messages };
   if (tools && tools.length) body.tools = tools;
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY!,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`Claude ${res.status}: ${text.slice(0, 500)}`);
-    if (res.status === 429) {
-      throw new Error("Too many searches right now — try a more specific query in a minute.");
+  // Up to 2 attempts with backoff on 429 — busy bursts (multi-photo upload)
+  // can blip past Anthropic's per-minute limit; one retry usually clears it.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 429 && attempt === 0) {
+      const ra = parseInt(res.headers.get("retry-after") || "5", 10);
+      const waitMs = Math.min(Math.max(Number.isFinite(ra) ? ra : 5, 1), 10) * 1000;
+      console.warn(`Claude 429 — retrying after ${waitMs}ms`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
     }
-    if (res.status >= 500) {
-      throw new Error("Search is temporarily unavailable. Please try again.");
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`Claude ${res.status}: ${text.slice(0, 500)}`);
+      if (res.status === 429) {
+        throw new Error("We're temporarily over Claude's rate limit — wait ~30 seconds and try again.");
+      }
+      if (res.status >= 500) {
+        throw new Error("Claude is temporarily unavailable. Please try again.");
+      }
+      throw new Error("Claude couldn't complete that request.");
     }
-    throw new Error("Couldn't complete that search. Try being more specific.");
+    const payload = await res.json();
+    const parts = Array.isArray(payload?.content) ? payload.content : [];
+    return parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("").trim();
   }
-  const payload = await res.json();
-  const parts = Array.isArray(payload?.content) ? payload.content : [];
-  return parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("").trim();
+  throw new Error("We're temporarily over Claude's rate limit — wait ~30 seconds and try again.");
 }
 
 function coerceJson(text: string): Record<string, any> {
@@ -429,48 +443,14 @@ async function extractFromUrl(url: string) {
   return data;
 }
 
-async function extractFromImage(image: { base64: string; mediaType: string }) {
-  const prompt = [
-    "This is a screenshot of an outdoor gear product page.",
-    "Identify the product, then extract the fields below.",
-    "",
-    EXTRACTION_SCHEMA,
-    "",
-    "Rules:",
-    "- Prefer listed product weight over shipping weight.",
-    "- For multi-packs (e.g. '3 Pack'), return the weight of a SINGLE unit and set quantity to the pack size.",
-    "- The URL should be the manufacturer's own product page when you are confident; otherwise use whatever URL is visible in the screenshot's address bar, else null.",
-    "- Do NOT describe the screenshot itself; only extract the gear data.",
-  ].join("\n");
-
-  const text = await callClaude(
-    [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: { type: "base64", media_type: image.mediaType, data: image.base64 },
-          },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
-    900,
-  );
-  const data = normalize(coerceJson(text), null);
-
-  // Step 2: ask Claude — now that it's identified the product — to fill gaps
-  // in weight / manufacturer URL / image URL using its product knowledge.
+// Shared post-processing: fill gaps via identity, fetch og:image, verify, web-search fallback.
+async function enrichGearData(data: ReturnType<typeof normalize>) {
   if (data.name && (!data.weightGrams || !data.url || !data.imageUrl)) {
     const enriched = await enrichByIdentity(data.name, data.brand);
     data.weightGrams = data.weightGrams ?? enriched.weightGrams;
     data.url = data.url || enriched.url;
     data.imageUrl = data.imageUrl || enriched.imageUrl;
   }
-
-  // Step 3: if we ended up with a URL, try to fetch it. If it responds,
-  // prefer its og:image for the thumbnail.
   if (data.url) {
     const html = await fetchHtml(data.url);
     if (html) {
@@ -478,16 +458,7 @@ async function extractFromImage(image: { base64: string; mediaType: string }) {
       if (og) data.imageUrl = og;
     }
   }
-
-  // Step 3b: verify the image URL actually resolves — Claude sometimes
-  // hallucinates plausible-looking CDN URLs that don't exist. If bad, drop
-  // it so the web-search fallback below has a chance to fix it.
   if (data.imageUrl && !(await verifyImageUrl(data.imageUrl))) data.imageUrl = null;
-
-  // Step 4: still no thumbnail? Have Claude web-search for a product page
-  // (any reputable site — manufacturer, REI, Backcountry, etc.) and pull
-  // its og:image. The image doesn't need to come from the same site as the
-  // original screenshot — just needs to be the same product.
   if (!data.imageUrl && data.name) {
     const searchedUrl = await searchWebForProductUrl(data.name, data.brand);
     if (searchedUrl) {
@@ -499,8 +470,114 @@ async function extractFromImage(image: { base64: string; mediaType: string }) {
       }
     }
   }
-
   return data;
+}
+
+// Image identification: returns top candidates with a confidence label.
+// Mode 'auto' handles both photographs of physical gear AND screenshots of
+// product pages with one unified prompt. Modes 'photo' and 'screenshot' use
+// scenario-specific wording for cases where the caller knows the source.
+// When forceMultiple is true, always return 2-3 candidates even on high
+// confidence — used for re-identify and on desktop where alternates are
+// always shown.
+async function extractCandidatesFromPhoto(
+  image: { base64: string; mediaType: string },
+  forceMultiple: boolean,
+  mode: "photo" | "screenshot" | "auto" = "photo",
+) {
+  let intro: string[];
+  if (mode === "screenshot") {
+    intro = [
+      "This is a screenshot of an outdoor gear product page.",
+      "Identify the product from the visible page text (name, brand, listed weight, URL in the address bar) plus your product knowledge.",
+    ];
+  } else if (mode === "photo") {
+    intro = [
+      "This is a photograph of an outdoor gear product on a plain background.",
+      "Identify the product from visible branding, model markings, distinctive shape, materials, or your product knowledge.",
+    ];
+  } else {
+    intro = [
+      "This image shows an outdoor gear product. It may be either:",
+      "  (A) a photograph of the physical product, often on a plain background, OR",
+      "  (B) a screenshot of a webpage showing the product (with product photos, text, specs, possibly a URL in the address bar).",
+      "Identify the product using whichever signals are present: visible logos and model markings, page text and specs, the URL bar, distinctive shape — plus your product knowledge to fill in fields not directly visible.",
+    ];
+  }
+
+  const prompt = [
+    ...intro,
+    "",
+    "Return ONLY a JSON object — no markdown fences, no prose:",
+    "{",
+    `  "confidence": "high" | "medium" | "low",`,
+    `  "candidates": [`,
+    `    {`,
+    `      "name": string (concise product name without pack-size suffix),`,
+    `      "brand": string|null (manufacturer),`,
+    `      "weightGrams": number|null (single-unit weight in grams from page text or your product knowledge),`,
+    `      "quantity": number|null (pack size if multi-pack, else 1),`,
+    `      "url": string|null (manufacturer's product page — visible in screenshot or from your knowledge; never invent),`,
+    `      "imageUrl": string|null (manufacturer's product image URL from your knowledge),`,
+    `      "notes": string|null (1-2 short sentences: key features, material, size)`,
+    `    }`,
+    `  ]`,
+    "}",
+    "",
+    "Confidence levels:",
+    `- "high": clear identification — explicit page text/URL, OR unambiguous visible branding.`,
+    `- "medium": brand identifiable but the exact model is your best guess.`,
+    `- "low": no clear branding visible; guessing from shape and category alone.`,
+    "",
+    "Rules:",
+    forceMultiple
+      ? "- ALWAYS return 2 or 3 candidates ordered by likelihood (best first), even if confidence is high — the user wants to see alternatives."
+      : `- If confidence is "high", return exactly 1 candidate. Otherwise return 2 or 3 candidates ordered by likelihood (best first).`,
+    "- Each candidate must be a specific named product (e.g. \"Black Diamond Solution Harness\"), not a generic category.",
+    "- For multi-packs (e.g. \"3 Pack\"), return the SINGLE-unit weight and set quantity to the pack size.",
+    "- url: never invent — only return URLs you are sure about (visible in the screenshot, or from your knowledge of the manufacturer's site).",
+    "- Do NOT describe the image itself; only extract gear data.",
+  ].join("\n");
+
+  const text = await callClaude(
+    [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.base64 } },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+    1800,
+  );
+
+  const raw = coerceJson(text);
+  const conf: "high" | "medium" | "low" =
+    raw.confidence === "high" || raw.confidence === "medium" || raw.confidence === "low"
+      ? raw.confidence
+      : "low";
+  const rawCandidates = Array.isArray(raw.candidates) ? raw.candidates.slice(0, 3) : [];
+  const candidates = rawCandidates
+    .map((c: any) => normalize(c, null))
+    .filter((c: ReturnType<typeof normalize>) => c.name);
+
+  if (candidates.length === 0) {
+    throw new Error("Couldn't identify any gear in the photo. Try a clearer shot with the brand visible.");
+  }
+
+  // Eagerly enrich only the TOP candidate. Alternates ship raw — the client
+  // lazy-enriches them via the {identity} mode if the user picks one. This
+  // keeps per-photo Anthropic call count bounded (~3 instead of ~7), which
+  // matters when the user uploads several photos in quick succession.
+  const top = await enrichGearData(candidates[0]);
+  const result = [top, ...candidates.slice(1)];
+
+  return {
+    data: top,
+    confidence: conf,
+    candidates: result,
+  };
 }
 
 Deno.serve(async (req) => {
@@ -547,8 +624,14 @@ Deno.serve(async (req) => {
       return json({ data });
     }
     if (body?.image?.base64 && body?.image?.mediaType) {
-      const data = await extractFromImage(body.image);
-      return json({ data });
+      const requestedMode = body?.mode;
+      const mode: "photo" | "screenshot" | "auto" =
+        requestedMode === "photo" || requestedMode === "screenshot" || requestedMode === "auto"
+          ? requestedMode
+          : "auto";
+      const forceMultiple = body?.forceMultiple === true;
+      const result = await extractCandidatesFromPhoto(body.image, forceMultiple, mode);
+      return json(result);
     }
     return json({ error: "Provide { query }, { url }, or { image: { base64, mediaType } }" }, 400);
   } catch (err) {
