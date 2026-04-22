@@ -257,6 +257,17 @@ sender_name = "PackUp"
 subject = "Sign in to PackUpGear"
 content_path = "./supabase/templates/magic_link.html"
 
+# Custom signup confirmation template: Supabase uses this when
+# signInWithOtp({ shouldCreateUser: true }) is called for an email that
+# doesn't yet have an account. Same URL shape as the magic-link template
+# but with type=signup so the client-side verifyOtp() call works for the
+# new-user code path too. Without this, new signups would hit Supabase's
+# default confirmation template which uses a different URL scheme and
+# breaks the ?share=<token> redirect round-trip.
+[auth.email.template.confirmation]
+subject = "Confirm your PackUpGear account"
+content_path = "./supabase/templates/confirmation.html"
+
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
 # enabled = true
