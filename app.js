@@ -251,6 +251,7 @@ let dragState = null;
 let mobileMode = localStorage.getItem('pack:mobileMode') || 'library'; // 'library' | 'packing'
 let realtimeChannel = null;
 let realtimeChannelActivityId = null;
+let globalItemsChannel = null;        // listens to all activity_items inserts so non-active tab badges update live
 let shareModalActivityId = null;
 let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
 let pendingOpenActivityId = null;     // consumed from ?activity= on boot, applied after sign-in
@@ -1796,6 +1797,22 @@ function updateGearPreview() {
   const parts = [name || '(no name)', brand, weight ? `${weight} ${displayUnit}` : null].filter(Boolean);
   meta.textContent = parts.join(' · ');
   $('#take-photo-section').classList.toggle('hidden', !!url);
+  updateGearSaveBtnState();
+}
+
+// Gate the "Add to library" button during the photo flow so a user can't
+// submit before Claude finishes identifying the image (or before they type a
+// name themselves on an error). Outside the photo flow this is a no-op; the
+// manual Add Gear path still relies on the standard name-required validation
+// in handleSaveGear.
+function updateGearSaveBtnState() {
+  const btn = $('#gear-save-btn');
+  if (!btn) return;
+  if (!isPhotoFlowActive()) return;
+  const entry = photoQueue[photoIndex];
+  const analyzing = !entry || entry.status === 'pending' || entry.status === 'analyzing';
+  const hasName = $('#gear-name').value.trim().length > 0;
+  btn.disabled = analyzing || !hasName;
 }
 
 // Read a File from <input type="file" capture> and return a JPEG data URL,
@@ -2246,6 +2263,11 @@ function clearPhotoQueue() {
   $('#photo-workflow-progress').classList.add('hidden');
   $('#photo-reidentify-btn').classList.add('hidden');
   $('#photo-cancel-btn').classList.add('hidden');
+  // Re-enable the save button now that photo flow is over. The save guard in
+  // updateGearSaveBtnState() only runs while photo flow is active, so without
+  // this the button would stay disabled after cancel.
+  const btn = $('#gear-save-btn');
+  if (btn) btn.disabled = false;
 }
 
 function setPhotoWorkflowStatus(text, { loading = false, error = false, success = false } = {}) {
@@ -2430,7 +2452,6 @@ function showCurrentPhoto() {
     $('#photo-candidates').classList.add('hidden');
     $('#photo-reidentify-btn').classList.add('hidden');
     $('#photo-cancel-btn').classList.remove('hidden');
-    saveBtn.disabled = true;
   } else if (entry.status === 'error') {
     setPhotoWorkflowStatus(entry.error || 'Could not identify gear in that photo.', { error: true });
     $('#photo-candidates').classList.add('hidden');
@@ -2441,7 +2462,6 @@ function showCurrentPhoto() {
       $('#gear-image').value = entry.dataUrl;
       updateGearPreview();
     }
-    saveBtn.disabled = false;
   } else if (entry.status === 'ready') {
     const c = entry.candidates[entry.selectedIndex];
     const label = c ? [c.brand, c.name].filter(Boolean).join(' ') : '';
@@ -2455,8 +2475,8 @@ function showCurrentPhoto() {
     if (c) applyCandidateForce(c, entry.dataUrl);
     $('#photo-reidentify-btn').classList.remove('hidden');
     $('#photo-cancel-btn').classList.remove('hidden');
-    saveBtn.disabled = false;
   }
+  updateGearSaveBtnState();
 }
 
 async function processPhotoEntry(entry, { forceMultiple = false } = {}) {

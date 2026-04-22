@@ -275,6 +275,12 @@ body.modal-open #main-view { overflow: hidden; }
 }
 .btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
 .btn:active { transform: translateY(1px); }
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 .btn-primary {
   background: var(--accent); color: var(--accent-text); border-color: var(--accent);
 }
