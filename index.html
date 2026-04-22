@@ -534,26 +534,74 @@
         </div>
       </header>
       <div class="modal-body">
-        <div class="field">
-          <label for="activity-emoji">Emoji</label>
-          <input id="activity-emoji" type="text" maxlength="4" placeholder="🧗" />
+        <!-- Form view (shown for New Activity + Edit Activity). Hidden after
+             a successful Create, when the success view below takes over. -->
+        <div id="activity-form-view">
+          <div class="field">
+            <label for="activity-name">Name</label>
+            <div class="activity-name-row">
+              <button id="activity-emoji-btn" class="activity-emoji-btn" type="button" aria-label="Change emoji" title="Click to change emoji">
+                <span id="activity-emoji-display" aria-hidden="true">🎒</span>
+              </button>
+              <input id="activity-name" type="text" placeholder="Climbing" autocomplete="off" />
+            </div>
+            <input id="activity-emoji" type="text" maxlength="4" class="activity-emoji-hidden" aria-hidden="true" tabindex="-1" />
+            <p class="field-hint muted">We'll pick an emoji to match — click the emoji to change it.</p>
+          </div>
+          <div id="activity-invite-field" class="field">
+            <label for="activity-invite-emails">Share with (optional)</label>
+            <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
+            <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
+          </div>
+
+          <div id="activity-emoji-picker" class="emoji-picker-popover hidden" role="dialog" aria-label="Pick an emoji">
+            <!-- Populated at init time from EMOJI_PICKER_CHOICES. -->
+          </div>
         </div>
-        <div class="field">
-          <label for="activity-name">Name</label>
-          <input id="activity-name" type="text" placeholder="Climbing" />
-        </div>
-        <div id="activity-invite-field" class="field">
-          <label for="activity-invite-emails">Share with (optional)</label>
-          <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
-          <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
+
+        <!-- Post-create success view: shows the share link so the user can
+             drop it into a text thread without a second trip through the
+             share modal. Hidden in Edit mode + during form entry. -->
+        <div id="activity-created-view" hidden>
+          <div class="activity-created-head">
+            <div class="activity-created-emoji" aria-hidden="true">
+              <span id="activity-created-emoji">🎒</span>
+            </div>
+            <div class="activity-created-head-text">
+              <div class="activity-created-title" id="activity-created-title">List created!</div>
+              <div class="activity-created-sub">Grab the link — paste it anywhere to invite friends.</div>
+            </div>
+          </div>
+          <div class="share-section share-link-section">
+            <div class="share-section-label">Share with anyone</div>
+            <div class="share-link-row">
+              <input
+                id="activity-created-share-url"
+                class="share-link-url"
+                type="text"
+                readonly
+                aria-label="Invite link"
+              />
+              <button
+                id="activity-created-share-copy"
+                class="btn btn-primary share-link-copy"
+                type="button"
+              >
+                Copy
+              </button>
+            </div>
+            <p class="field-hint muted">Anyone with this link can join the list.</p>
+          </div>
+          <p class="activity-created-emails-note muted" id="activity-created-emails-note" hidden></p>
         </div>
       </div>
       <footer class="modal-footer">
         <button id="activity-delete-btn" class="btn btn-danger hidden">Delete</button>
         <button id="activity-duplicate-btn" class="btn btn-secondary hidden">Duplicate</button>
         <div class="spacer"></div>
-        <button class="btn btn-ghost" data-close="activity-modal">Cancel</button>
+        <button id="activity-cancel-btn" class="btn btn-ghost" data-close="activity-modal">Cancel</button>
         <button id="activity-save-btn" class="btn btn-primary">Save</button>
+        <button id="activity-done-btn" class="btn btn-primary hidden">Done</button>
       </footer>
     </div>
   </div>

@@ -1119,6 +1119,80 @@ img.brand-badge-logo {
 .field-hint { margin: 2px 0 0; font-size: 12px; }
 .input-row { display: flex; gap: 8px; }
 .input-row input { flex: 1; }
+
+/* ============ Activity modal — name + emoji ============ */
+.activity-name-row { display: flex; gap: 10px; align-items: stretch; }
+.activity-name-row input { flex: 1; }
+
+.activity-emoji-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.activity-emoji-btn:hover { border-color: var(--accent); }
+.activity-emoji-btn:focus-visible { outline: none; border-color: var(--accent); }
+.activity-emoji-btn.is-placeholder { opacity: 0.55; }
+
+/* Hidden input that backs the emoji button. We keep a real <input> so mobile
+   can focus it to trigger the native emoji keyboard, but it shouldn't take
+   visual space. */
+.activity-emoji-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  clip: rect(0 0 0 0);
+}
+
+.emoji-picker-popover {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  margin-top: -6px;
+  margin-bottom: 14px;
+  padding: 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.emoji-picker-popover.hidden { display: none; }
+.emoji-picker-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.emoji-picker-option:hover { background: var(--bg-elev-3, rgba(255,255,255,0.05)); border-color: var(--border); }
+.emoji-picker-option:focus-visible { outline: none; border-color: var(--accent); }
+
+@media (max-width: 520px) {
+  .emoji-picker-popover { grid-template-columns: repeat(6, 1fr); }
+  .activity-emoji-btn { width: 48px; height: 48px; font-size: 24px; }
+}
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

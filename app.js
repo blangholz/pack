@@ -34,7 +34,7 @@ function cleanAuthParamsFromUrl() {
     url.hash = '';
     dirty = true;
   }
-  for (const k of ['code', 'error', 'error_description', 'error_code', 'token_hash', 'type']) {
+  for (const k of ['code', 'error', 'error_description', 'error_code', 'token_hash', 'type', 'redirect_to']) {
     if (url.searchParams.has(k)) {
       url.searchParams.delete(k);
       dirty = true;
@@ -73,38 +73,51 @@ const WEATHER_TYPES = [
 // when the user's library doesn't have anything matching; `filterExamples`
 // is what we show in the "Tap + to add (e.g. …)" hint.
 const ACTIVITY_PRESETS = [
-  { match: /hik|trail|trek|backpack/i, label: 'hiking',
+  { match: /hik|trail|trek|backpack/i, label: 'hiking', emoji: '🥾',
     keywords: ['hik','boot','daypack','trek','pole','gaiter','blister','map','compass'],
     generic: ['Hiking boots','Daypack','Trekking poles','Blister kit','Map / GPS'],
     filterExamples: 'Day hike, Backpacking' },
-  { match: /climb|whitney|alpine|crag|boulder|trad|sport/i, label: 'climbing',
+  { match: /climb|whitney|alpine|crag|boulder|trad|sport/i, label: 'climbing', emoji: '🧗',
     keywords: ['climb','harness','chalk','quickdraw','cam','nut','rope','belay','crash pad','approach','rappel'],
     generic: ['Harness','Climbing shoes','Chalk bag','Helmet','Belay device'],
     filterExamples: 'Trad, Sport, Bouldering' },
-  { match: /ski|snowboard|split|skin/i, label: 'skiing',
+  { match: /ski|snowboard|split|skin/i, label: 'skiing', emoji: '🎿',
     keywords: ['ski','snowboard','goggle','skin','avy','probe','beacon','shovel','helmet'],
     generic: ['Skis or snowboard','Boots','Goggles','Gloves','Avy beacon'],
     filterExamples: 'Resort, Backcountry' },
-  { match: /camp|overnight|bivy/i, label: 'camping',
+  { match: /camp|overnight|bivy/i, label: 'camping', emoji: '⛺',
     keywords: ['tent','sleeping','pad','stove','bivy','tarp','fuel','headlamp','lantern'],
     generic: ['Tent','Sleeping bag','Sleeping pad','Stove','Headlamp'],
     filterExamples: 'Car camp, Backpacking' },
-  { match: /bike|cycl|mtb|gravel/i, label: 'cycling',
+  { match: /bike|cycl|mtb|gravel/i, label: 'cycling', emoji: '🚴',
     keywords: ['bike','cycl','saddle','pedal','tube','chain','helmet'],
     generic: ['Helmet','Gloves','Water bottle','Repair kit','Bike lights'],
     filterExamples: 'Road, Gravel, MTB' },
-  { match: /run|marathon|jog/i, label: 'running',
+  { match: /run|marathon|jog/i, label: 'running', emoji: '🏃',
     keywords: ['run','shoe','short'],
     generic: ['Running shoes','Shorts','Moisture-wicking top','Water bottle'],
     filterExamples: 'Trail, Road' },
-  { match: /paragli|fly|speed ?fly|acro/i, label: 'flying',
+  { match: /paragli|fly|speed ?fly|acro/i, label: 'flying', emoji: '🪂',
     keywords: ['glider','wing','harness','reserve','vario','helmet'],
     generic: ['Paraglider / wing','Harness','Helmet','Reserve','Vario'],
     filterExamples: 'XC, Acro' },
-  { match: /highlin|slackline/i, label: 'highlining',
+  { match: /highlin|slackline/i, label: 'highlining', emoji: '🎪',
     keywords: ['webbing','slackline','leash','backup','sling','anchor'],
     generic: ['Webbing','Tensioning system','Harness','Leash'],
     filterExamples: 'Longline, Waterline' },
+];
+
+const DEFAULT_ACTIVITY_EMOJI = '🎒';
+
+// Curated set shown in the desktop emoji-picker overlay. Leading block
+// mirrors the ACTIVITY_PRESETS so the most-likely match is one click away;
+// the rest are adjacent outdoor / water / seasonal / general-travel choices.
+const EMOJI_PICKER_CHOICES = [
+  '🥾','🧗','⛺','🎿','🚴','🏃','🪂','🎪',
+  '🎒','🧳','🏕','🏞','🗻','🏔','🌲','🌊',
+  '🛶','🏄','🏊','🎣','🏂','⛷','🧘','🏇',
+  '🔥','☀️','❄️','🌙','🌄','🌅','⛰','🌋',
+  '🏝','🧭','⛵','🚤','🚁','🛫','🗺','📍',
 ];
 
 // Keywords/generic fallbacks that apply regardless of activity — the
@@ -2653,6 +2666,29 @@ async function handleGearPhotoFile(file) {
 // ------------------------------------------------------------------
 // Activity modal
 // ------------------------------------------------------------------
+// Auto-emoji state: stays true until the user explicitly picks or types an
+// emoji, at which point we stop overwriting their choice as they keep
+// editing the name. Reset each time the modal opens.
+let activityEmojiAutoDerive = true;
+
+function syncActivityEmojiDisplay() {
+  const hidden = $('#activity-emoji');
+  const display = $('#activity-emoji-display');
+  if (!hidden || !display) return;
+  const v = (hidden.value || '').trim();
+  display.textContent = v || DEFAULT_ACTIVITY_EMOJI;
+  $('#activity-emoji-btn')?.classList.toggle('is-placeholder', !v);
+}
+
+function autoDeriveActivityEmoji() {
+  if (!activityEmojiAutoDerive) return;
+  const name = $('#activity-name').value;
+  const preset = presetForActivity({ name });
+  const emoji = preset ? preset.emoji : '';
+  $('#activity-emoji').value = emoji;
+  syncActivityEmojiDisplay();
+}
+
 function openNewActivity() {
   editingActivityId = null;
   $('#activity-modal-title').textContent = 'New activity';
@@ -2664,6 +2700,9 @@ function openNewActivity() {
   $('#activity-duplicate-btn').classList.add('hidden');
   // Share glyph only makes sense on existing lists.
   $('#activity-modal-share-btn').classList.add('hidden');
+  activityEmojiAutoDerive = true;
+  syncActivityEmojiDisplay();
+  hideEmojiPicker();
   showModal('activity-modal');
   requestAnimationFrame(() => $('#activity-name').focus());
 }
@@ -2683,7 +2722,68 @@ function openEditActivity(id) {
   $('#activity-duplicate-btn').classList.remove('hidden');
   // Show the share glyph for anyone — RLS gates what they can actually do.
   $('#activity-modal-share-btn').classList.remove('hidden');
+  // In edit mode we respect whatever emoji was saved — either the user picked
+  // it deliberately, or it was auto-derived at create time and they're happy
+  // with it. Either way, don't silently rewrite it as they retype the name.
+  activityEmojiAutoDerive = !a.emoji;
+  syncActivityEmojiDisplay();
+  hideEmojiPicker();
   showModal('activity-modal');
+}
+
+// ---- Emoji picker overlay ----
+function isDesktopPointer() {
+  return typeof matchMedia === 'function'
+    && matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+
+function buildEmojiPicker() {
+  const host = $('#activity-emoji-picker');
+  if (!host || host.dataset.built === '1') return;
+  host.dataset.built = '1';
+  for (const e of EMOJI_PICKER_CHOICES) {
+    const btn = h('button', {
+      class: 'emoji-picker-option',
+      type: 'button',
+      'aria-label': `Use ${e}`,
+      onclick: () => pickActivityEmoji(e),
+    }, e);
+    host.appendChild(btn);
+  }
+}
+
+function showEmojiPicker() {
+  buildEmojiPicker();
+  $('#activity-emoji-picker')?.classList.remove('hidden');
+  $('#activity-emoji-btn')?.setAttribute('aria-expanded', 'true');
+}
+
+function hideEmojiPicker() {
+  $('#activity-emoji-picker')?.classList.add('hidden');
+  $('#activity-emoji-btn')?.setAttribute('aria-expanded', 'false');
+}
+
+function pickActivityEmoji(emoji) {
+  $('#activity-emoji').value = emoji;
+  activityEmojiAutoDerive = false;
+  syncActivityEmojiDisplay();
+  hideEmojiPicker();
+}
+
+function handleActivityEmojiBtnClick() {
+  if (isDesktopPointer()) {
+    const picker = $('#activity-emoji-picker');
+    if (picker && !picker.classList.contains('hidden')) hideEmojiPicker();
+    else showEmojiPicker();
+  } else {
+    // Mobile: pop open the native keyboard so the user can use their
+    // system emoji picker. User-typed emoji wins over auto-derive.
+    const input = $('#activity-emoji');
+    if (!input) return;
+    input.classList.add('is-editing');
+    input.focus();
+    input.select();
+  }
 }
 
 async function handleSaveActivity() {
@@ -4043,6 +4143,27 @@ function wire() {
   $('#activity-name').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveActivity(); }
   });
+  // Auto-derive emoji from the name unless the user has picked one.
+  $('#activity-name').addEventListener('input', autoDeriveActivityEmoji);
+  // Clicking the emoji chip opens the picker on desktop, or focuses the
+  // hidden input on mobile to pop the native emoji keyboard.
+  $('#activity-emoji-btn').addEventListener('click', handleActivityEmojiBtnClick);
+  // If the user typed an emoji directly (mobile native keyboard), treat it
+  // as a manual pick and stop auto-deriving.
+  $('#activity-emoji').addEventListener('input', () => {
+    activityEmojiAutoDerive = false;
+    syncActivityEmojiDisplay();
+  });
+  // Click-outside closes the picker.
+  document.addEventListener('click', (e) => {
+    const picker = $('#activity-emoji-picker');
+    if (!picker || picker.classList.contains('hidden')) return;
+    if (e.target.closest('#activity-emoji-picker')) return;
+    if (e.target.closest('#activity-emoji-btn')) return;
+    hideEmojiPicker();
+  });
+  // Build the picker grid once at init.
+  buildEmojiPicker();
 
   // Modal close
   $$('[data-close]').forEach((el) => {
