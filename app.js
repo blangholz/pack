@@ -828,7 +828,7 @@ async function removeGearFromActivity(activityId, gearId) {
   render();
 }
 
-async function addGearToActivity(activityId, gearId) {
+async function addGearToActivity(activityId, gearId, insertIdx) {
   if (!activityId) return;
   const existing = itemsFor(activityId).find((i) => i.gear_id === gearId);
   if (existing) {
@@ -839,14 +839,29 @@ async function addGearToActivity(activityId, gearId) {
     render();
     return;
   }
-  const position = itemsFor(activityId).length;
+  const items = itemsFor(activityId).slice();
+  const appendPos = items.length;
   const { data, error } = await supabase
     .from('activity_items')
-    .insert({ activity_id: activityId, gear_id: gearId, position, quantity: 1 })
+    .insert({ activity_id: activityId, gear_id: gearId, position: appendPos, quantity: 1 })
     .select()
     .single();
   if (error) { toast(error.message, 'error'); return; }
-  (itemsByActivity[activityId] ||= []).push(data);
+  items.push(data);
+  if (insertIdx != null && insertIdx >= 0 && insertIdx < items.length - 1) {
+    const [moved] = items.splice(items.length - 1, 1);
+    items.splice(insertIdx, 0, moved);
+    itemsByActivity[activityId] = items;
+    render();
+    const updates = items.map((it, i) =>
+      supabase.from('activity_items').update({ position: i }).eq('id', it.id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r.error);
+    if (failed) toast(failed.error.message, 'error');
+    return;
+  }
+  itemsByActivity[activityId] = items;
   render();
 }
 
@@ -1053,7 +1068,10 @@ function handleItemDrop(e, activityId, targetGearId) {
   if (dragState.kind === 'item' && dragState.activityId === activityId) {
     reorderActivityItems(activityId, dragState.gearId, targetGearId, above ? 'above' : 'below');
   } else if (dragState.kind === 'gear') {
-    addGearToActivity(activityId, dragState.gearId);
+    const items = itemsFor(activityId);
+    const targetIdx = items.findIndex((i) => i.gear_id === targetGearId);
+    const insertIdx = targetIdx < 0 ? undefined : targetIdx + (above ? 0 : 1);
+    addGearToActivity(activityId, dragState.gearId, insertIdx);
   }
   e.stopPropagation();
 }

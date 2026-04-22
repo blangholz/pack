@@ -31,9 +31,9 @@ function json(body: unknown, status = 200) {
   });
 }
 
-// Validate the caller's access token against Supabase auth. Returns the user
-// id on success, or null if the token is missing/invalid/expired.
-async function requireUser(req: Request): Promise<string | null> {
+// Validate the caller's access token against Supabase auth. Returns the
+// user id + raw token on success, or null if the token is missing/invalid.
+async function requireAuth(req: Request): Promise<{ userId: string; token: string } | null> {
   const auth = req.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
   if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
@@ -43,9 +43,37 @@ async function requireUser(req: Request): Promise<string | null> {
     });
     if (!res.ok) return null;
     const user = await res.json();
-    return typeof user?.id === "string" ? user.id : null;
+    return typeof user?.id === "string" ? { userId: user.id, token } : null;
   } catch {
     return null;
+  }
+}
+
+// Calls the hit_rate_limit SQL function with the user's JWT so auth.uid()
+// resolves server-side. Fails open on infrastructure errors so a DB blip
+// doesn't break the app for legitimate users.
+async function checkRateLimit(
+  token: string,
+  bucket: string,
+  maxCount: number,
+  windowSeconds: number,
+): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return true;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/hit_rate_limit`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${token}`,
+        "apikey": SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ bucket, max_count: maxCount, window_seconds: windowSeconds }),
+    });
+    if (!res.ok) return true;
+    const allowed = await res.json();
+    return allowed === true;
+  } catch {
+    return true;
   }
 }
 
@@ -473,8 +501,19 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   if (!ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY not configured" }, 500);
 
-  const userId = await requireUser(req);
-  if (!userId) return json({ error: "Unauthorized" }, 401);
+  const auth = await requireAuth(req);
+  if (!auth) return json({ error: "Unauthorized" }, 401);
+
+  const allowed = await checkRateLimit(auth.token, "extract_gear", 30, 60);
+  if (!allowed) {
+    return new Response(
+      JSON.stringify({ error: "Rate limit exceeded. Please wait a minute before trying again." }),
+      {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "60", ...CORS_HEADERS },
+      },
+    );
+  }
 
   let body: any;
   try {
