@@ -105,6 +105,7 @@
           </div>
         </div>
         <input id="gear-search" class="gear-search" type="search" placeholder="🔍 Search gear…" />
+        <button id="brand-filter-toggle" class="brand-filter-toggle hidden" type="button" aria-controls="brand-filter-pills" aria-expanded="false">Filter by brand ▾</button>
         <div id="brand-filter-pills" class="brand-filter-pills hidden" aria-label="Filter by brand"></div>
         <div id="gear-list" class="gear-list" aria-live="polite"></div>
         <div id="gear-empty" class="empty-state hidden">
@@ -211,6 +212,17 @@
       </header>
 
       <div class="modal-body">
+        <!-- Mobile-only: identify gear from a photo -->
+        <div id="identify-photo-section" class="identify-photo-section">
+          <button id="identify-photo-btn" class="btn btn-primary identify-photo-btn" type="button">
+            <span class="identify-photo-icon" aria-hidden="true">📷</span>
+            <span>Identify gear from a photo</span>
+          </button>
+          <p id="identify-photo-status" class="field-hint muted identify-photo-status hidden" role="status" aria-live="polite"></p>
+          <input type="file" id="identify-photo-input" accept="image/*" capture="environment" class="hidden" />
+          <div class="identify-photo-divider"><span>or enter manually</span></div>
+        </div>
+
         <!-- Section 1: Search -->
         <div class="section-label">① Search for a product</div>
         <div class="field gear-search-field">

@@ -131,6 +131,7 @@ let activeActivityId = null;
 let displayUnit = localStorage.getItem(LS_UNIT_KEY) || 'g';
 let gearSearchQuery = '';
 let brandFilter = null;               // lowercase brand label, or null
+let brandFilterExpanded = false;       // mobile: is the pill strip open?
 let libraryEditMode = false;
 let editingGearId = null;             // null = adding
 let editingActivityId = null;         // null = adding
@@ -415,6 +416,7 @@ function renderLibrary() {
 
 function renderBrandFilters() {
   const host = $('#brand-filter-pills');
+  const toggle = $('#brand-filter-toggle');
   host.innerHTML = '';
 
   const counts = new Map();
@@ -430,10 +432,21 @@ function renderBrandFilters() {
   if (counts.size < 2) {
     host.classList.add('hidden');
     host.classList.remove('has-active');
+    toggle.classList.add('hidden');
     return;
   }
+  toggle.classList.remove('hidden');
   host.classList.remove('hidden');
   host.classList.toggle('has-active', !!brandFilter);
+
+  // Always render the pills into the DOM; mobile CSS controls whether the
+  // strip is visible. Force-open when a brand is actively filtering.
+  const showStrip = brandFilterExpanded || !!brandFilter;
+  host.classList.toggle('expanded', showStrip);
+  toggle.setAttribute('aria-expanded', showStrip ? 'true' : 'false');
+  toggle.textContent = brandFilter
+    ? `Filtering by ${counts.get(brandFilter)?.label || brandFilter} ▴`
+    : (showStrip ? 'Filter by brand ▴' : 'Filter by brand ▾');
 
   const entries = Array.from(counts.entries()).sort((a, b) => b[1].count - a[1].count);
   for (const [key, { label, count }] of entries) {
@@ -1839,20 +1852,16 @@ function wire() {
   });
 
   // Gear search
-  const gearSearchInput = $('#gear-search');
-  const gearLibraryAside = document.querySelector('.gear-library');
-  const syncSearchActive = () => {
-    if (!gearLibraryAside) return;
-    const active = document.activeElement === gearSearchInput || gearSearchInput.value.trim().length > 0;
-    gearLibraryAside.classList.toggle('search-active', active);
-  };
-  gearSearchInput.addEventListener('input', (e) => {
+  $('#gear-search').addEventListener('input', (e) => {
     gearSearchQuery = e.target.value;
-    syncSearchActive();
     renderLibrary();
   });
-  gearSearchInput.addEventListener('focus', syncSearchActive);
-  gearSearchInput.addEventListener('blur', syncSearchActive);
+
+  // Mobile-only brand filter toggle
+  $('#brand-filter-toggle').addEventListener('click', () => {
+    brandFilterExpanded = !brandFilterExpanded;
+    renderBrandFilters();
+  });
 
   // Library edit mode
   $('#library-edit-toggle').addEventListener('click', () => {
