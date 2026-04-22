@@ -489,7 +489,17 @@ async function loadAll() {
     if (res.error) console.warn(`Load ${name}: ${res.error.message}`);
   }
   gearList = gearRes.data || [];
-  activities = actRes.data || [];
+  // Dedup by id as a safety net — realtime member-INSERT can race with this
+  // fetch and briefly double up the same activity if the handler's post-await
+  // guard is beaten by timing. This collapses the duplicate deterministically.
+  {
+    const seen = new Set();
+    activities = (actRes.data || []).filter((a) => {
+      if (seen.has(a.id)) return false;
+      seen.add(a.id);
+      return true;
+    });
+  }
   itemsByActivity = {};
   for (const it of itemRes.data || []) {
     (itemsByActivity[it.activity_id] ||= []).push(it);
@@ -3469,7 +3479,10 @@ async function onGlobalMembersChange(payload) {
     // activity row + its items so the tab populates.
     if (payload.new.user_id === me && !activities.some((a) => a.id === aid)) {
       const { data: a } = await supabase.from('activities').select('*').eq('id', aid).maybeSingle();
-      if (a) {
+      // Re-check after the await: applyPendingShareToken's loadAll() call or
+      // onGlobalActivitiesChange might have added the activity in the meantime.
+      // Without this check we'd race and push a duplicate tab.
+      if (a && !activities.some((x) => x.id === aid)) {
         activities.push(a);
         activities.sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
       }
@@ -3656,6 +3669,18 @@ async function applyPendingShareToken() {
     if (!error && data && data.activity_id) preview = data;
   } catch {}
 
+  // One-shot flag set by handleShareSignupSubmit before the magic link went
+  // out — if it matches this token, the user already explicitly opted into
+  // THIS list on the landing page, so skip the confirm modal and auto-accept
+  // silently. Scoped to a specific token to prevent a stale flag from
+  // auto-enroling the user into an unrelated list.
+  let autoAccept = false;
+  try {
+    const flag = localStorage.getItem('pack.autoAcceptShare');
+    if (flag && flag === token) autoAccept = true;
+    localStorage.removeItem('pack.autoAcceptShare');
+  } catch {}
+
   if (preview && activities.find((a) => a.id === preview.activity_id)) {
     activeActivityId = preview.activity_id;
     render();
@@ -3664,14 +3689,13 @@ async function applyPendingShareToken() {
     return;
   }
 
-  if (preview) {
+  if (preview && !autoAccept) {
     showShareAcceptModal(token, preview);
     return;
   }
 
-  // Preview endpoint failed (network, rate limit, etc.). Fall back to
-  // accept-first so the user isn't stranded — they'll land on the shared
-  // list even if we couldn't show the confirm overlay.
+  // Preview endpoint failed OR autoAccept is set: accept silently. Either way
+  // the user ends up on the shared list without a confirm prompt.
   await acceptShareLinkAndSwitch(token);
 }
 
@@ -4056,6 +4080,12 @@ async function handleShareSignupSubmit(e) {
   btn.disabled = true;
   setShareLandingStatus('Sending your magic link…');
   const redirectTo = `${window.location.origin}/?share=${encodeURIComponent(pendingShareToken)}`;
+  // Remember that this user already explicitly opted into this list on the
+  // landing page. When the magic link brings them back authed, applyPendingShareToken
+  // reads this flag and auto-accepts silently instead of re-asking with the
+  // confirm modal. Scoped to this exact token so a stale flag for one list
+  // can't auto-enrol someone into a different list.
+  try { localStorage.setItem('pack.autoAcceptShare', pendingShareToken); } catch {}
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
@@ -4564,14 +4594,22 @@ function wire() {
 // ------------------------------------------------------------------
 async function syncDisplayName(user) {
   console.log('[auth] user_metadata=', user?.user_metadata);
-  const fullName = user?.user_metadata?.full_name;
+  const fullName = (user?.user_metadata?.full_name || '').trim();
   if (!fullName) return;
   const { data: profile } = await supabase
     .from('profiles')
     .select('display_name')
     .eq('id', user.id)
     .maybeSingle();
-  if (profile?.display_name) return;
+  const current = (profile?.display_name || '').trim();
+  const email = (user.email || '').trim().toLowerCase();
+  const emailLocal = email.split('@')[0] || '';
+  // Don't overwrite a name the user explicitly picked in the onboarding modal;
+  // but DO overwrite blanks and auto-derived fallbacks (email / email local part)
+  // with the full_name we captured at signup.
+  const looksAutoDerived = !!current && !!email &&
+    (current.toLowerCase() === email || current.toLowerCase() === emailLocal);
+  if (current && !looksAutoDerived) return;
   await supabase
     .from('profiles')
     .upsert({ id: user.id, display_name: fullName }, { onConflict: 'id' });
