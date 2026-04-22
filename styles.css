@@ -1342,6 +1342,9 @@ img.brand-badge-logo {
   }
   .identify-photo-icon { font-size: 20px; line-height: 1; }
   .identify-photo-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin: 0;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
@@ -1350,10 +1353,16 @@ img.brand-badge-logo {
     font-size: 14px;
     line-height: 1.4;
   }
+  .identify-photo-status.loading {
+    border-color: var(--accent);
+    color: var(--text);
+  }
   .identify-photo-status.error {
     border-color: var(--danger, #c2410c);
     color: var(--danger, #c2410c);
   }
+  .identify-photo-status .spinner-sm { flex: 0 0 auto; }
+  .identify-photo-status-text { flex: 1 1 auto; min-width: 0; }
   .identify-photo-divider {
     display: flex;
     align-items: center;
@@ -1371,6 +1380,92 @@ img.brand-badge-logo {
     height: 1px;
     background: var(--border);
   }
+}
+
+/* Photo explainer modal — first-time tips before the camera opens */
+.photo-explainer-panel { max-width: 380px; }
+.photo-explainer-lede {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.photo-tips-diagram {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 16px;
+}
+.photo-tips-frame {
+  position: relative;
+  width: 220px;
+  height: 150px;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(255,255,255,0.06), transparent 60%),
+    var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  overflow: hidden;
+}
+.photo-tips-corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--accent);
+}
+.photo-tips-corner.tl { top: 8px;    left: 8px;    border-right: 0; border-bottom: 0; border-top-left-radius: 4px; }
+.photo-tips-corner.tr { top: 8px;    right: 8px;   border-left: 0;  border-bottom: 0; border-top-right-radius: 4px; }
+.photo-tips-corner.bl { bottom: 8px; left: 8px;    border-right: 0; border-top: 0;    border-bottom-left-radius: 4px; }
+.photo-tips-corner.br { bottom: 8px; right: 8px;   border-left: 0;  border-top: 0;    border-bottom-right-radius: 4px; }
+.photo-tips-sun {
+  position: absolute;
+  top: 6px;
+  right: 30px;
+  font-size: 18px;
+  filter: drop-shadow(0 1px 2px rgba(251, 191, 36, 0.4));
+}
+.photo-tips-gear {
+  font-size: 56px;
+  line-height: 1;
+}
+.photo-tips-brand {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.photo-tips-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.photo-tips-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.photo-tip-icon {
+  flex: 0 0 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--bg-elev-2);
+  border-radius: 50%;
+  font-size: 16px;
 }
 
 /* ============ Activity picker ============ */
@@ -1504,11 +1599,13 @@ img.brand-badge-logo {
     padding: 0 6px;
   }
 
-  /* Single-panel layout — pick which based on data-mobile-mode on body */
+  /* Single-panel layout — pick which based on data-mobile-mode on body.
+     Use dvh so the height shrinks when iOS Safari's chrome is visible,
+     keeping the activity footer above the bottom tab bar. */
   .app-main {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
-    height: calc(100vh - 53px - 64px - env(safe-area-inset-bottom, 0px));
+    height: calc(100dvh - 53px - 72px - env(safe-area-inset-bottom, 0px));
   }
   body[data-mobile-mode="library"] .activity-panel { display: none; }
   body[data-mobile-mode="packing"] .gear-library { display: none; }
