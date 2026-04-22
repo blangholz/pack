@@ -141,7 +141,6 @@
         <footer class="activity-footer" id="activity-footer">
           <div class="totals">
             <span id="activity-total">Total: 0 g</span>
-            <span id="activity-packed" class="muted"></span>
           </div>
           <div class="activity-actions">
             <button id="reset-checklist-btn" class="btn btn-ghost">Reset checklist</button>
@@ -244,26 +243,28 @@
           <p id="fetch-status" class="field-hint muted"></p>
         </div>
 
-        <!-- Section 3: Screenshot -->
-        <div class="section-label">③ Or drop a screenshot</div>
-        <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
-          <div class="dropzone-idle">
-            <div class="dropzone-icon">🖼️</div>
-            <div class="dropzone-title">Drop a product screenshot here</div>
-            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
-          </div>
-          <div class="dropzone-preview hidden">
-            <img id="screenshot-preview" alt="Screenshot preview" />
-            <div class="dropzone-preview-row">
-              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
-                <span class="spinner-sm" aria-hidden="true"></span>
-                <span id="screenshot-status">Reading the screenshot…</span>
+        <!-- Section 3: Screenshot (desktop / hover-pointer devices only) -->
+        <div class="screenshot-section-wrap">
+          <div class="section-label">③ Or drop a screenshot</div>
+          <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
+            <div class="dropzone-idle">
+              <div class="dropzone-icon">🖼️</div>
+              <div class="dropzone-title">Drop a product screenshot here</div>
+              <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+            </div>
+            <div class="dropzone-preview hidden">
+              <img id="screenshot-preview" alt="Screenshot preview" />
+              <div class="dropzone-preview-row">
+                <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
+                  <span class="spinner-sm" aria-hidden="true"></span>
+                  <span id="screenshot-status">Reading the screenshot…</span>
+                </div>
+                <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
               </div>
-              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
             </div>
           </div>
+          <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
         </div>
-        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
 
         <!-- Section 4: Manual -->
         <div class="section-label">④ Or edit details manually</div>
@@ -317,6 +318,46 @@
         <button class="btn btn-ghost" data-close="gear-modal">Cancel</button>
         <button id="gear-delete-btn" class="btn btn-danger hidden">Delete</button>
         <button id="gear-save-btn" class="btn btn-primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Photo explainer (first-time only, before opening the camera) -->
+  <div id="photo-explainer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="photo-explainer-title">
+    <div class="modal-backdrop" data-close="photo-explainer-modal"></div>
+    <div class="modal-panel modal-narrow photo-explainer-panel">
+      <header class="modal-header">
+        <h3 id="photo-explainer-title">📷 Identify gear from a photo</h3>
+        <button class="icon-btn" data-close="photo-explainer-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        <p class="photo-explainer-lede">We'll do our best to identify your gear from a photo. For the best results:</p>
+
+        <div class="photo-tips-diagram" aria-hidden="true">
+          <div class="photo-tips-frame">
+            <span class="photo-tips-corner tl"></span>
+            <span class="photo-tips-corner tr"></span>
+            <span class="photo-tips-corner bl"></span>
+            <span class="photo-tips-corner br"></span>
+            <span class="photo-tips-sun">☀️</span>
+            <div class="photo-tips-gear">🎒</div>
+            <div class="photo-tips-brand">BRAND</div>
+          </div>
+        </div>
+
+        <ul class="photo-tips-list">
+          <li><span class="photo-tip-icon" aria-hidden="true">🧹</span><span>Place the gear by itself on a clean surface</span></li>
+          <li><span class="photo-tip-icon" aria-hidden="true">🏷️</span><span>Have any brand or model markings facing the camera</span></li>
+          <li><span class="photo-tip-icon" aria-hidden="true">💡</span><span>Use good lighting — daylight works great</span></li>
+          <li><span class="photo-tip-icon" aria-hidden="true">📐</span><span>Fill the frame, front-on — angled shots are harder to read</span></li>
+          <li><span class="photo-tip-icon" aria-hidden="true">🪪</span><span>Got a hangtag or spec sticker? Even better — include it</span></li>
+          <li><span class="photo-tip-icon" aria-hidden="true">🧥</span><span>For soft stuff (jackets, sleeping bags), lay it flat so the shape shows</span></li>
+        </ul>
+      </div>
+      <footer class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" data-close="photo-explainer-modal">Cancel</button>
+        <button id="photo-explainer-continue" class="btn btn-primary">Take photo</button>
       </footer>
     </div>
   </div>

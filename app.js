@@ -627,7 +627,6 @@ function renderActivity() {
   const list = $('#activity-list');
   const empty = $('#activity-empty');
   const totalEl = $('#activity-total');
-  const packedEl = $('#activity-packed');
   const resetBtn = $('#reset-checklist-btn');
   const editBtn = $('#edit-activity-btn');
 
@@ -636,7 +635,6 @@ function renderActivity() {
   if (!activity) {
     empty.classList.add('hidden');
     totalEl.textContent = 'Total: —';
-    packedEl.textContent = '';
     resetBtn.disabled = true;
     editBtn.disabled = true;
     return;
@@ -676,17 +674,12 @@ function renderActivity() {
     }
   }
 
-  let total = 0, packed = 0, packedCount = 0;
+  let total = 0;
   for (const { item, gear } of visibleItems) {
     const qty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
-    const w = (gear.weight_grams || 0) * qty;
-    total += w;
-    if (item.packed) { packed += w; packedCount += 1; }
+    total += (gear.weight_grams || 0) * qty;
   }
   totalEl.textContent = `Total: ${formatWeight(total)}`;
-  packedEl.textContent = visibleItems.length
-    ? `${formatWeight(packed)} packed • ${packedCount}/${visibleItems.length} items`
-    : '';
 }
 
 function activityItemRow(activity, item, gear) {
@@ -1199,6 +1192,9 @@ function resetGearForm() {
   resetScreenshotUI();
   resetGearSearchUI();
   setIdentifyPhotoStatus(null);
+  $('#gear-save-btn').disabled = false;
+  $('#gear-save-btn').textContent = '＋ Add to library';
+  $('#identify-photo-btn').disabled = false;
   updateGearPreview();
 }
 
@@ -1306,6 +1302,7 @@ function openEditGear(id) {
   resetGearForm();
   editingGearId = id;
   $('#gear-modal-title').textContent = 'Edit gear';
+  $('#gear-save-btn').textContent = 'Save changes';
   $('#gear-delete-btn').classList.remove('hidden');
   setGearForm(gear);
   showModal('gear-modal');
@@ -1660,25 +1657,31 @@ async function handleScreenshotFile(file) {
   }
 }
 
-function setIdentifyPhotoStatus(text, isError = false) {
+function setIdentifyPhotoStatus(text, { loading = false, error = false } = {}) {
   const el = $('#identify-photo-status');
+  el.classList.remove('error', 'loading');
+  el.innerHTML = '';
   if (!text) {
     el.classList.add('hidden');
-    el.textContent = '';
-    el.classList.remove('error');
     return;
   }
-  el.textContent = text;
   el.classList.remove('hidden');
-  el.classList.toggle('error', !!isError);
+  if (loading) {
+    el.classList.add('loading');
+    el.appendChild(h('span', { class: 'spinner-sm', 'aria-hidden': 'true' }));
+  }
+  if (error) el.classList.add('error');
+  el.appendChild(h('span', { class: 'identify-photo-status-text' }, text));
 }
 
 async function handleGearPhotoFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
   if ($('#gear-modal').classList.contains('hidden')) openAddGear();
   const btn = $('#identify-photo-btn');
+  const saveBtn = $('#gear-save-btn');
   btn.disabled = true;
-  setIdentifyPhotoStatus('Identifying gear from your photo…');
+  saveBtn.disabled = true;
+  setIdentifyPhotoStatus('Analyzing your photo with Claude…', { loading: true });
   try {
     const { base64, mediaType } = await fileToResizedDataUrl(file);
     const res = await callExtractGear({ image: { base64, mediaType }, mode: 'photo' });
@@ -1694,13 +1697,17 @@ async function handleGearPhotoFile(file) {
     } else {
       setIdentifyPhotoStatus(
         'Couldn\u2019t confidently identify this — please fill in the details below.',
-        true,
+        { error: true },
       );
     }
   } catch (err) {
-    setIdentifyPhotoStatus(err.message || 'Could not identify the gear from that photo.', true);
+    setIdentifyPhotoStatus(
+      err.message || 'Could not identify the gear from that photo.',
+      { error: true },
+    );
   } finally {
     btn.disabled = false;
+    saveBtn.disabled = false;
   }
 }
 
@@ -1944,8 +1951,25 @@ function wire() {
     }
   });
 
-  // Identify gear from a photo (mobile) — sends to Claude vision in photo mode
-  $('#identify-photo-btn').addEventListener('click', () => $('#identify-photo-input').click());
+  // Identify gear from a photo (mobile) — first time shows the tips modal,
+  // afterward jumps straight to the camera. Both paths must call the file
+  // input synchronously inside the click handler so iOS keeps the gesture.
+  const PHOTO_EXPLAINER_KEY = 'pack:photoExplainerSeen';
+  function openCameraForIdentify() {
+    $('#identify-photo-input').click();
+  }
+  $('#identify-photo-btn').addEventListener('click', () => {
+    if (localStorage.getItem(PHOTO_EXPLAINER_KEY)) {
+      openCameraForIdentify();
+    } else {
+      showModal('photo-explainer-modal');
+    }
+  });
+  $('#photo-explainer-continue').addEventListener('click', () => {
+    localStorage.setItem(PHOTO_EXPLAINER_KEY, '1');
+    hideModal('photo-explainer-modal');
+    openCameraForIdentify();
+  });
   $('#identify-photo-input').addEventListener('change', (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
