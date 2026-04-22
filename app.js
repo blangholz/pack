@@ -251,7 +251,15 @@ let dragState = null;
 let mobileMode = localStorage.getItem('pack:mobileMode') || 'library'; // 'library' | 'packing'
 let realtimeChannel = null;
 let realtimeChannelActivityId = null;
-let globalItemsChannel = null;        // listens to all activity_items inserts so non-active tab badges update live
+// One channel per table that needs cross-tab live updates. The per-activity
+// channel (syncRealtimeSubscription) only watches the active tab; these
+// listen across every row the user can see and skip events for the active
+// activity to avoid double-applying.
+let globalItemsChannel = null;
+let globalActivitiesChannel = null;
+let globalMembersChannel = null;
+let globalCustomFiltersChannel = null;
+let globalGearChannel = null;
 let shareModalActivityId = null;
 let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
 let pendingShareToken = null;         // consumed from ?share= on boot, applied after sign-in
@@ -497,7 +505,7 @@ async function loadAll() {
   setStatus('');
   render();
   syncRealtimeSubscription();
-  setupGlobalItemsRealtime();
+  setupGlobalRealtime();
   // Whatever the user lands on at boot, mark it as seen so the badge there
   // clears immediately on next render.
   if (activeActivityId) markActivitySeen(activeActivityId);
@@ -1296,7 +1304,10 @@ function activityItemRow(activity, item, gear, opts = {}) {
     || (currentUser && (gear.owner_id === currentUser.id || isOwnerOf(activity.id)));
 
   const row = h('div', {
-    class: 'activity-item' + (item.packed ? ' packed' : '') + (shared ? ' shared' : ''),
+    class: 'activity-item'
+      + (item.packed ? ' packed' : '')
+      + (shared ? ' shared' : '')
+      + (pendingFlashGearIds.has(gear.id) ? ' flash-bump' : ''),
     draggable: 'true',
     dataset: { gearId: gear.id, itemId: item.id },
     role: 'button',
@@ -1398,20 +1409,23 @@ async function removeGearFromActivity(activityId, gearId) {
 }
 
 // Pulse the activity-item row for `gearId` so the user notices the quantity
-// bumped (otherwise re-dragging a gear looks like it did nothing). The
-// classList dance forces the animation to restart even when the flash class
-// is re-applied within its own animation window.
+// bumped (otherwise re-dragging a gear looks like it did nothing). Tracked
+// in a Set because the realtime echo of the user's own UPDATE re-renders
+// the list ~100-200ms later — without this, the fresh DOM node replaces
+// the flashing one before the animation is visible. activityItemRow reads
+// this set when building each row, so the class re-applies across rebuilds
+// until the timeout clears it.
+const pendingFlashGearIds = new Set();
 function flashActivityItem(gearId) {
-  requestAnimationFrame(() => {
+  pendingFlashGearIds.add(gearId);
+  renderActivity();
+  setTimeout(() => {
+    pendingFlashGearIds.delete(gearId);
     const row = document.querySelector(
       `#activity-list .activity-item[data-gear-id="${CSS.escape(String(gearId))}"]`
     );
-    if (!row) return;
-    row.classList.remove('flash-bump');
-    void row.offsetWidth; // force reflow so the animation replays
-    row.classList.add('flash-bump');
-    setTimeout(() => row.classList.remove('flash-bump'), 700);
-  });
+    if (row) row.classList.remove('flash-bump');
+  }, 800);
 }
 
 async function addGearToActivity(activityId, gearId, insertIdx) {
@@ -3157,15 +3171,25 @@ async function syncRealtimeSubscription() {
   realtimeChannel = channel;
 }
 
-// Listens to activity_items changes across EVERY activity the user can see (RLS
-// gates membership). The per-activity channel above only carries the active
-// tab; this one keeps the unread badge on inactive tabs live so the user
-// doesn't need to refresh to see "the climbing tab has 3 new items".
-async function setupGlobalItemsRealtime() {
-  if (globalItemsChannel) {
-    try { supabase.removeChannel(globalItemsChannel); } catch {}
-    globalItemsChannel = null;
+// Sets up unfiltered subscriptions to every table that needs cross-tab live
+// updates. RLS gates membership so each user only receives events for rows
+// they can read. Handlers below skip events for the active activity (handled
+// by syncRealtimeSubscription's per-activity channel) to avoid double-apply.
+async function setupGlobalRealtime() {
+  for (const ch of [
+    globalItemsChannel,
+    globalActivitiesChannel,
+    globalMembersChannel,
+    globalCustomFiltersChannel,
+    globalGearChannel,
+  ]) {
+    if (ch) { try { supabase.removeChannel(ch); } catch {} }
   }
+  globalItemsChannel = null;
+  globalActivitiesChannel = null;
+  globalMembersChannel = null;
+  globalCustomFiltersChannel = null;
+  globalGearChannel = null;
   if (!currentUser) return;
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -3178,12 +3202,24 @@ async function setupGlobalItemsRealtime() {
   }
   globalItemsChannel = supabase
     .channel('items-global')
-    .on('postgres_changes',
-      { event: '*', schema: 'public', table: 'activity_items' },
-      (payload) => onGlobalItemsChange(payload))
-    .subscribe((status, err) => {
-      console.log(`[realtime] channel items-global status=${status}`, err || '');
-    });
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_items' }, onGlobalItemsChange)
+    .subscribe((status, err) => console.log(`[realtime] items-global=${status}`, err || ''));
+  globalActivitiesChannel = supabase
+    .channel('activities-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' }, onGlobalActivitiesChange)
+    .subscribe((status, err) => console.log(`[realtime] activities-global=${status}`, err || ''));
+  globalMembersChannel = supabase
+    .channel('members-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_members' }, onGlobalMembersChange)
+    .subscribe((status, err) => console.log(`[realtime] members-global=${status}`, err || ''));
+  globalCustomFiltersChannel = supabase
+    .channel('custom-filters-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'custom_filters' }, onGlobalCustomFiltersChange)
+    .subscribe((status, err) => console.log(`[realtime] custom-filters-global=${status}`, err || ''));
+  globalGearChannel = supabase
+    .channel('gear-global')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gear' }, onGlobalGearChange)
+    .subscribe((status, err) => console.log(`[realtime] gear-global=${status}`, err || ''));
 }
 
 async function onGlobalItemsChange(payload) {
@@ -3208,6 +3244,130 @@ async function onGlobalItemsChange(payload) {
     itemsByActivity[aid] = items.filter((i) => i.id !== payload.old.id);
   }
   renderTabs();
+}
+
+// Activities INSERT/UPDATE/DELETE across every activity the user can read.
+// New shared activity invitations show up as INSERTs (RLS lets the user
+// SELECT once activity_members has their row); deletions remove the tab.
+function onGlobalActivitiesChange(payload) {
+  if (payload.eventType === 'INSERT') {
+    if (activities.some((a) => a.id === payload.new.id)) return;
+    activities.push(payload.new);
+    activities.sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    render();
+  } else if (payload.eventType === 'UPDATE') {
+    if (payload.new.id === activeActivityId) return; // per-activity channel
+    const idx = activities.findIndex((a) => a.id === payload.new.id);
+    if (idx >= 0) activities[idx] = payload.new;
+    else activities.push(payload.new);
+    renderTabs();
+  } else if (payload.eventType === 'DELETE') {
+    const id = payload.old.id;
+    activities = activities.filter((a) => a.id !== id);
+    delete itemsByActivity[id];
+    delete customFiltersByActivity[id];
+    delete membersByActivity[id];
+    delete invitesByActivity[id];
+    delete viewsByActivity[id];
+    if (activeActivityId === id) {
+      activeActivityId = activities[0]?.id || null;
+      syncRealtimeSubscription();
+    }
+    render();
+  }
+}
+
+// Members across every activity. Detects when the user themselves is added
+// to a new activity (so their tabs appear) and when they're removed (so the
+// stale tab disappears immediately).
+async function onGlobalMembersChange(payload) {
+  const aid = payload.new?.activity_id || payload.old?.activity_id;
+  if (!aid) return;
+  if (aid === activeActivityId) return; // per-activity channel handles it
+  const me = currentUser?.id;
+  const list = membersByActivity[aid] || (membersByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (!list.some((m) => m.user_id === payload.new.user_id)) list.push(payload.new);
+    // If the new member is me, this is a fresh activity I just got invited
+    // to — the activities INSERT may not have arrived yet (or arrived
+    // before the membership row, in which case RLS hid it). Reload the
+    // activity row + its items so the tab populates.
+    if (payload.new.user_id === me && !activities.some((a) => a.id === aid)) {
+      const { data: a } = await supabase.from('activities').select('*').eq('id', aid).maybeSingle();
+      if (a) {
+        activities.push(a);
+        activities.sort((x, y) => (x.position ?? 0) - (y.position ?? 0));
+      }
+      const { data: items } = await supabase.from('activity_items').select('*').eq('activity_id', aid);
+      if (items) itemsByActivity[aid] = items;
+      await loadForeignGear();
+    }
+    await loadCoMemberProfiles();
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = list.findIndex((m) => m.user_id === payload.new.user_id);
+    if (idx >= 0) list[idx] = payload.new;
+  } else if (payload.eventType === 'DELETE') {
+    membersByActivity[aid] = list.filter((m) => m.user_id !== payload.old.user_id);
+    // If I was just removed from this activity, drop it from my view entirely.
+    if (payload.old.user_id === me) {
+      activities = activities.filter((a) => a.id !== aid);
+      delete itemsByActivity[aid];
+      delete customFiltersByActivity[aid];
+      delete membersByActivity[aid];
+      delete viewsByActivity[aid];
+      if (activeActivityId === aid) {
+        activeActivityId = activities[0]?.id || null;
+        syncRealtimeSubscription();
+      }
+    }
+  }
+  render();
+}
+
+function onGlobalCustomFiltersChange(payload) {
+  const aid = payload.new?.activity_id || payload.old?.activity_id;
+  if (!aid) return;
+  if (aid === activeActivityId) return;
+  const list = customFiltersByActivity[aid] || (customFiltersByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (!list.some((f) => f.id === payload.new.id)) list.push(payload.new);
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = list.findIndex((f) => f.id === payload.new.id);
+    if (idx >= 0) list[idx] = payload.new;
+    else list.push(payload.new);
+  } else if (payload.eventType === 'DELETE') {
+    customFiltersByActivity[aid] = list.filter((f) => f.id !== payload.old.id);
+  }
+}
+
+// Gear updates from any owner. A co-member renaming their "BD Camalot" to
+// "BD C4" should reflect immediately in everyone's packing list — items
+// render via gear_id lookup, so we just have to keep the gear row fresh.
+function onGlobalGearChange(payload) {
+  const me = currentUser?.id;
+  if (payload.eventType === 'DELETE') {
+    const id = payload.old.id;
+    gearList = gearList.filter((g) => g.id !== id);
+    delete foreignGearById[id];
+    render();
+    return;
+  }
+  if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+    const row = payload.new;
+    if (row.owner_id === me) {
+      const idx = gearList.findIndex((g) => g.id === row.id);
+      if (idx >= 0) gearList[idx] = row;
+      else if (payload.eventType === 'INSERT') gearList.unshift(row);
+    } else if (foreignGearById[row.id]) {
+      // Only track co-member gear we've already loaded into the foreign cache —
+      // adding a stranger's gear blindly would balloon the cache. The cache is
+      // populated lazily when activity_items reference it.
+      foreignGearById[row.id] = row;
+    } else {
+      return;
+    }
+    render();
+  }
 }
 
 async function onRealtimeItemChange(aid, payload) {
@@ -4138,8 +4298,20 @@ function onSignedOut() {
   if (realtimeChannel) { try { supabase.removeChannel(realtimeChannel); } catch {} }
   realtimeChannel = null;
   realtimeChannelActivityId = null;
-  if (globalItemsChannel) { try { supabase.removeChannel(globalItemsChannel); } catch {} }
+  for (const ch of [
+    globalItemsChannel,
+    globalActivitiesChannel,
+    globalMembersChannel,
+    globalCustomFiltersChannel,
+    globalGearChannel,
+  ]) {
+    if (ch) { try { supabase.removeChannel(ch); } catch {} }
+  }
   globalItemsChannel = null;
+  globalActivitiesChannel = null;
+  globalMembersChannel = null;
+  globalCustomFiltersChannel = null;
+  globalGearChannel = null;
   const banner = $('#invite-banner');
   if (banner) banner.classList.add('hidden');
   showAuth();
