@@ -20,7 +20,7 @@ import { join } from 'node:path';
 
 const SITE_ORIGIN = 'https://packupgear.com';
 const OG_IMAGE_URL = `${SITE_ORIGIN}/og-share.png`;
-const GENERIC_TITLE = 'PackUpGear — Gear up. Get out.';
+const GENERIC_TITLE = 'PackUpGear — Pack up, get out.';
 const GENERIC_DESCRIPTION =
   'Track your gear. Build packing lists for every adventure.';
 
@@ -71,7 +71,7 @@ function buildMeta({ title, description, url }) {
     `<meta property="og:image" content="${img}">`,
     `<meta property="og:image:width" content="1200">`,
     `<meta property="og:image:height" content="630">`,
-    `<meta property="og:image:alt" content="PackUpGear — Gear up. Get out.">`,
+    `<meta property="og:image:alt" content="PackUpGear — Pack up, get out.">`,
     `<meta name="twitter:card" content="summary_large_image">`,
     `<meta name="twitter:title" content="${t}">`,
     `<meta name="twitter:description" content="${d}">`,
