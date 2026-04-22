@@ -474,15 +474,13 @@ function renderBrandFilters() {
 
 function gearCard(gear) {
   const imgNode = gearImageEl(gear.image_url);
-  const imgWrap = gear.url
-    ? h('a', {
+  const imgWrap = gear.image_url
+    ? h('button', {
         class: 'gear-image-link',
-        href: gear.url,
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        title: 'Open product page',
-        'aria-label': `Open ${gear.name || 'product'} page`,
-        onclick: (e) => e.stopPropagation(),
+        type: 'button',
+        title: 'Tap to preview',
+        'aria-label': `Preview ${gear.name || 'image'}`,
+        onclick: (e) => { e.stopPropagation(); openImagePreview(gear); },
         ondragstart: (e) => e.preventDefault(),
       }, imgNode)
     : imgNode;
@@ -510,7 +508,7 @@ function gearCard(gear) {
 
   const children = [imgWrap, meta, right];
   if (libraryEditMode) {
-    const actions = h('div', { class: 'gear-card-actions' },
+    const actionButtons = [
       h('button', {
         class: 'btn btn-ghost btn-sm',
         type: 'button',
@@ -521,10 +519,29 @@ function gearCard(gear) {
         type: 'button',
         onclick: (e) => { e.stopPropagation(); handleInlineDeleteGear(gear.id); },
       }, 'Delete'),
-    );
-    children.push(actions);
+    ];
+    if (gear.url) {
+      actionButtons.unshift(h('a', {
+        class: 'btn btn-ghost btn-sm',
+        href: gear.url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        onclick: (e) => e.stopPropagation(),
+      }, 'Open page ↗'));
+    }
+    children.push(h('div', { class: 'gear-card-actions' }, ...actionButtons));
   }
   return h('div', cardProps, ...children);
+}
+
+function openImagePreview(gear) {
+  if (!gear || !gear.image_url) return;
+  const img = $('#image-preview-img');
+  img.src = gear.image_url;
+  img.alt = gear.name || 'Gear preview';
+  const caption = $('#image-preview-caption');
+  caption.textContent = gear.name || '';
+  showModal('image-preview-modal');
 }
 
 function renderTabs() {
@@ -683,7 +700,17 @@ function renderActivity() {
 }
 
 function activityItemRow(activity, item, gear) {
-  const imgEl = gearImageEl(gear.image_url);
+  const imgNode = gearImageEl(gear.image_url);
+  const imgEl = gear.image_url
+    ? h('button', {
+        class: 'activity-item-image-link',
+        type: 'button',
+        title: 'Tap to preview',
+        'aria-label': `Preview ${gear.name || 'image'}`,
+        onclick: (e) => { e.stopPropagation(); openImagePreview(gear); },
+        ondragstart: (e) => e.preventDefault(),
+      }, imgNode)
+    : imgNode;
 
   const weatherSet = new Set(item.weather_tags || []);
   const weatherChips = h('div', {
@@ -1201,6 +1228,7 @@ function resetGearForm() {
   $('#gear-save-btn').disabled = false;
   $('#gear-save-btn').textContent = '＋ Add to library';
   $('#identify-photo-btn').disabled = false;
+  if (typeof clearPhotoQueue === 'function') clearPhotoQueue();
   updateGearPreview();
 }
 
@@ -1331,11 +1359,40 @@ async function handleSaveGear() {
     gearList.unshift(data);
     saved = data;
   }
+  // If we're in a multi-photo queue, advance to the next photo instead of closing.
+  if (isPhotoFlowActive() && photoQueue.length > 1 && photoIndex < photoQueue.length - 1) {
+    photoQueue[photoIndex].status = 'saved';
+    toast(`Added "${saved.name}" to library`, 'info');
+    render();
+    if (saved && !saved.image_url && saved.name) {
+      backgroundEnrichThumbnail(saved).catch(() => {});
+    }
+    // Reset form fields for the next photo (preserve the photo workflow UI).
+    resetGearFormFields();
+    advancePhotoQueue();
+    return;
+  }
   hideModal('gear-modal');
   render();
   if (saved && !saved.image_url && saved.name) {
     backgroundEnrichThumbnail(saved).catch(() => { /* silent */ });
   }
+}
+
+// Used between photos in a multi-photo queue: clear form fields without
+// touching the photo workflow state.
+function resetGearFormFields() {
+  editingGearId = null;
+  $('#gear-name').value = '';
+  $('#gear-brand').value = '';
+  $('#gear-weight').value = '';
+  $('#gear-quantity').value = '1';
+  $('#gear-url').value = '';
+  $('#gear-image').value = '';
+  $('#gear-notes').value = '';
+  $('#gear-delete-btn').classList.add('hidden');
+  $('#fetch-status').textContent = '';
+  updateGearPreview();
 }
 
 // After a gear is saved without a thumbnail, keep trying in the background.
@@ -1680,41 +1737,334 @@ function setIdentifyPhotoStatus(text, { loading = false, error = false } = {}) {
   el.appendChild(h('span', { class: 'identify-photo-status-text' }, text));
 }
 
-async function handleGearPhotoFile(file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  if ($('#gear-modal').classList.contains('hidden')) openAddGear();
-  const btn = $('#identify-photo-btn');
+// ------------------------------------------------------------------
+// Photo workflow (mobile single-shot + desktop multi-photo queue)
+// ------------------------------------------------------------------
+const IS_TOUCH = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+const MAX_PHOTO_QUEUE = 12;
+
+// photoQueue[i] = { id, file, dataUrl, status, candidates, confidence, selectedIndex, error }
+//   status: 'pending' | 'analyzing' | 'ready' | 'error'
+let photoQueue = [];
+let photoIndex = -1;
+let photoSeq = 0;
+
+function isPhotoFlowActive() {
+  return photoQueue.length > 0;
+}
+
+function clearPhotoQueue() {
+  photoSeq++;
+  photoQueue = [];
+  photoIndex = -1;
+  $('#photo-workflow').classList.add('hidden');
+  $('#gear-entry-methods').classList.remove('hidden');
+  $('#gear-skip-btn').classList.add('hidden');
+  document.body.classList.remove('photo-workflow-active');
+  setPhotoWorkflowStatus(null);
+  $('#photo-candidates').classList.add('hidden');
+  $('#photo-workflow-progress').classList.add('hidden');
+  $('#photo-reidentify-btn').classList.add('hidden');
+  $('#photo-cancel-btn').classList.add('hidden');
+}
+
+function setPhotoWorkflowStatus(text, { loading = false, error = false, success = false } = {}) {
+  const el = $('#photo-workflow-status');
+  el.classList.remove('error', 'loading', 'success');
+  el.innerHTML = '';
+  if (!text) {
+    el.textContent = '';
+    return;
+  }
+  if (loading) {
+    el.classList.add('loading');
+    el.appendChild(h('span', { class: 'spinner-sm', 'aria-hidden': 'true' }));
+  }
+  if (error) el.classList.add('error');
+  if (success) el.classList.add('success');
+  el.appendChild(h('span', { class: 'photo-workflow-status-text' }, text));
+}
+
+function renderPhotoProgress() {
+  const wrap = $('#photo-workflow-progress');
+  if (photoQueue.length <= 1) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  $('#photo-workflow-progress-label').textContent =
+    `Photo ${photoIndex + 1} of ${photoQueue.length}`;
+  const dots = $('#photo-workflow-progress-dots');
+  dots.innerHTML = '';
+  photoQueue.forEach((entry, i) => {
+    const cls = ['photo-progress-dot'];
+    if (i === photoIndex) cls.push('current');
+    if (entry.status === 'saved') cls.push('saved');
+    else if (entry.status === 'skipped') cls.push('skipped');
+    else if (entry.status === 'error') cls.push('error');
+    dots.appendChild(h('span', { class: cls.join(' '), title: `Photo ${i + 1}` }));
+  });
+}
+
+function renderCandidatesPicker(entry) {
+  const list = $('#photo-candidates-list');
+  list.innerHTML = '';
+  const wrap = $('#photo-candidates');
+  if (!entry.candidates || entry.candidates.length <= 1) {
+    wrap.classList.add('hidden');
+    return;
+  }
+  wrap.classList.remove('hidden');
+  const labelEl = $('#photo-candidates-label');
+  if (entry.confidence === 'high') {
+    labelEl.textContent = 'Best guess is selected — pick a different one if it\u2019s wrong:';
+  } else if (entry.confidence === 'medium') {
+    labelEl.textContent = 'A few possibilities — pick the closest match:';
+  } else {
+    labelEl.textContent = 'We weren\u2019t sure — does it look like one of these?';
+  }
+  entry.candidates.forEach((c, i) => {
+    const card = h('button', {
+      type: 'button',
+      class: 'photo-candidate-card' + (i === entry.selectedIndex ? ' selected' : ''),
+      role: 'radio',
+      'aria-checked': i === entry.selectedIndex ? 'true' : 'false',
+    });
+    const imgWrap = h('div', { class: 'photo-candidate-img-wrap' });
+    if (c.imageUrl) {
+      const img = h('img', { class: 'photo-candidate-img', alt: c.name || 'Candidate', referrerpolicy: 'no-referrer' });
+      img.dataset.retriedProxy = '';
+      img.onerror = () => {
+        if (!img.dataset.retriedProxy && !img.src.startsWith('https://images.weserv.nl/')) {
+          img.dataset.retriedProxy = '1';
+          img.src = 'https://images.weserv.nl/?url=' + encodeURIComponent(c.imageUrl.replace(/^https?:\/\//, ''));
+        } else {
+          img.style.display = 'none';
+        }
+      };
+      img.src = c.imageUrl;
+      imgWrap.appendChild(img);
+    } else {
+      imgWrap.appendChild(h('div', { class: 'photo-candidate-img-placeholder' }, '?'));
+    }
+    card.appendChild(imgWrap);
+    const body = h('div', { class: 'photo-candidate-body' });
+    body.appendChild(h('div', { class: 'photo-candidate-name' }, c.name || '(unnamed)'));
+    const metaParts = [];
+    if (c.brand) metaParts.push(c.brand);
+    if (c.weightGrams != null) {
+      const v = gramsToUnit(c.weightGrams, displayUnit);
+      metaParts.push(displayUnit === 'g' ? `${Math.round(v)} g` : `${v.toFixed(2)} ${displayUnit}`);
+    }
+    if (metaParts.length) body.appendChild(h('div', { class: 'photo-candidate-meta' }, metaParts.join(' · ')));
+    card.appendChild(body);
+    card.appendChild(h('span', { class: 'photo-candidate-check', 'aria-hidden': 'true' }, '✓'));
+    card.addEventListener('click', () => selectCandidate(i));
+    list.appendChild(card);
+  });
+}
+
+function applyCandidateForce(c, photoDataUrl) {
+  $('#gear-name').value = c.name || '';
+  $('#gear-brand').value = c.brand || '';
+  $('#gear-url').value = c.url || '';
+  $('#gear-notes').value = c.notes || '';
+  if (c.weightGrams != null) {
+    const v = gramsToUnit(c.weightGrams, displayUnit);
+    $('#gear-weight').value = displayUnit === 'g' ? String(Math.round(v)) : v.toFixed(2);
+  } else {
+    $('#gear-weight').value = '';
+  }
+  $('#gear-quantity').value = String(c.quantity ?? 1);
+  // Use Claude's product image if it exists, otherwise fall back to the user's photo.
+  $('#gear-image').value = c.imageUrl || photoDataUrl || '';
+  updateGearPreview();
+}
+
+function selectCandidate(i) {
+  if (!isPhotoFlowActive()) return;
+  const entry = photoQueue[photoIndex];
+  if (!entry || !entry.candidates || i < 0 || i >= entry.candidates.length) return;
+  entry.selectedIndex = i;
+  applyCandidateForce(entry.candidates[i], entry.dataUrl);
+  renderCandidatesPicker(entry);
+}
+
+function showCurrentPhoto() {
+  const entry = photoQueue[photoIndex];
+  if (!entry) return;
+  $('#photo-workflow').classList.remove('hidden');
+  $('#gear-entry-methods').classList.add('hidden');
+  document.body.classList.add('photo-workflow-active');
+  $('#photo-workflow-preview').src = entry.dataUrl || '';
+  renderPhotoProgress();
+  // Skip is only meaningful when there are more photos in the queue.
+  $('#gear-skip-btn').classList.toggle('hidden', photoQueue.length <= 1);
+  // Save button text adapts to queue position.
   const saveBtn = $('#gear-save-btn');
-  btn.disabled = true;
-  saveBtn.disabled = true;
-  setIdentifyPhotoStatus('Analyzing your photo with Claude…', { loading: true });
-  try {
-    const { base64, mediaType } = await fileToResizedDataUrl(file);
-    const res = await callExtractGear({ image: { base64, mediaType }, mode: 'photo' });
-    const data = res.data || {};
-    applyExtracted(data);
-    if (!$('#gear-image').value) {
-      $('#gear-image').value = await fileToThumbnailDataUrl(file);
+  const moreAfter = photoQueue.length > 1 && photoIndex < photoQueue.length - 1;
+  if (editingGearId) {
+    saveBtn.textContent = 'Save changes';
+  } else if (moreAfter) {
+    saveBtn.textContent = '＋ Add & next photo';
+  } else {
+    saveBtn.textContent = '＋ Add to library';
+  }
+  if (entry.status === 'analyzing' || entry.status === 'pending') {
+    setPhotoWorkflowStatus('Analyzing your photo with Claude…', { loading: true });
+    $('#photo-candidates').classList.add('hidden');
+    $('#photo-reidentify-btn').classList.add('hidden');
+    $('#photo-cancel-btn').classList.remove('hidden');
+    saveBtn.disabled = true;
+  } else if (entry.status === 'error') {
+    setPhotoWorkflowStatus(entry.error || 'Could not identify gear in that photo.', { error: true });
+    $('#photo-candidates').classList.add('hidden');
+    $('#photo-reidentify-btn').classList.remove('hidden');
+    $('#photo-cancel-btn').classList.remove('hidden');
+    // Use the photo as a fallback thumbnail so the user can still type a name and save.
+    if (!$('#gear-image').value && entry.dataUrl) {
+      $('#gear-image').value = entry.dataUrl;
       updateGearPreview();
     }
-    if (data.name) {
-      const label = [data.brand, data.name].filter(Boolean).join(' ');
-      setIdentifyPhotoStatus(`Identified as ${label} — review the fields below and save.`);
-    } else {
-      setIdentifyPhotoStatus(
-        'Couldn\u2019t confidently identify this — please fill in the details below.',
-        { error: true },
-      );
-    }
-  } catch (err) {
-    setIdentifyPhotoStatus(
-      err.message || 'Could not identify the gear from that photo.',
-      { error: true },
-    );
-  } finally {
-    btn.disabled = false;
+    saveBtn.disabled = false;
+  } else if (entry.status === 'ready') {
+    const c = entry.candidates[entry.selectedIndex];
+    const label = c ? [c.brand, c.name].filter(Boolean).join(' ') : '';
+    let msg;
+    if (entry.confidence === 'high') msg = `Identified: ${label}`;
+    else msg = `Best guess: ${label}`;
+    setPhotoWorkflowStatus(msg, { success: entry.confidence === 'high' });
+    renderCandidatesPicker(entry);
+    // Re-apply selected candidate to the form (in case this entry was
+    // prefetched in the background and the form was cleared between photos).
+    if (c) applyCandidateForce(c, entry.dataUrl);
+    $('#photo-reidentify-btn').classList.remove('hidden');
+    $('#photo-cancel-btn').classList.remove('hidden');
     saveBtn.disabled = false;
   }
+}
+
+async function processPhotoEntry(entry, { forceMultiple = false } = {}) {
+  const mySeq = photoSeq;
+  entry.status = 'analyzing';
+  entry.error = null;
+  if (photoQueue[photoIndex] === entry) showCurrentPhoto();
+  try {
+    const { base64, mediaType } = await fileToResizedDataUrl(entry.file);
+    if (mySeq !== photoSeq) return;
+    const res = await callExtractGear({
+      image: { base64, mediaType },
+      mode: 'photo',
+      forceMultiple: forceMultiple || !IS_TOUCH,  // desktop always wants alternates
+    });
+    if (mySeq !== photoSeq) return;
+    const candidates = Array.isArray(res.candidates) ? res.candidates : (res.data ? [res.data] : []);
+    if (candidates.length === 0) {
+      entry.status = 'error';
+      entry.error = 'Could not identify gear in this photo.';
+    } else {
+      entry.candidates = candidates;
+      entry.confidence = res.confidence || 'low';
+      entry.selectedIndex = 0;
+      entry.status = 'ready';
+      // Auto-apply the top candidate to the form (queue-current entry only).
+      if (photoQueue[photoIndex] === entry) {
+        applyCandidateForce(candidates[0], entry.dataUrl);
+      }
+    }
+  } catch (err) {
+    if (mySeq !== photoSeq) return;
+    entry.status = 'error';
+    entry.error = err.message || 'Could not identify gear from that photo.';
+  } finally {
+    if (mySeq === photoSeq && photoQueue[photoIndex] === entry) showCurrentPhoto();
+    renderPhotoProgress();
+  }
+}
+
+async function enqueuePhotos(files, { forceMultiple = false } = {}) {
+  const valid = Array.from(files || []).filter((f) => f && f.type && f.type.startsWith('image/'));
+  if (valid.length === 0) return;
+  const accepted = valid.slice(0, MAX_PHOTO_QUEUE);
+  if (valid.length > MAX_PHOTO_QUEUE) {
+    toast(`Processing the first ${MAX_PHOTO_QUEUE} photos`, 'info');
+  }
+  // Always start fresh when no queue is in progress — clears any leftover
+  // edit state so the photo workflow opens against a clean form.
+  if (!isPhotoFlowActive()) {
+    if ($('#gear-modal').classList.contains('hidden')) {
+      openAddGear();
+    } else {
+      resetGearFormFields();
+      clearPhotoQueue();
+    }
+  }
+  // First entry kicks off immediately; the rest sit pending.
+  for (const f of accepted) {
+    let dataUrl = '';
+    try { dataUrl = await fileToThumbnailDataUrl(f, 600, 0.8); } catch { /* ignore preview failure */ }
+    photoQueue.push({
+      id: Math.random().toString(36).slice(2),
+      file: f,
+      dataUrl,
+      status: 'pending',
+      candidates: null,
+      confidence: null,
+      selectedIndex: 0,
+      error: null,
+    });
+  }
+  if (photoIndex < 0) photoIndex = 0;
+  showCurrentPhoto();
+  // Process current first; once done, prefetch the next in background.
+  await processPhotoEntry(photoQueue[photoIndex], { forceMultiple });
+  prefetchNextPhotos();
+}
+
+function prefetchNextPhotos() {
+  // Pre-analyze the next photo in the background so it's ready when the user advances.
+  const nextIdx = photoIndex + 1;
+  if (nextIdx >= photoQueue.length) return;
+  const next = photoQueue[nextIdx];
+  if (next.status === 'pending') {
+    processPhotoEntry(next).catch(() => {});
+  }
+}
+
+function advancePhotoQueue() {
+  // Mark current as moved-on (saved/skipped already set by caller).
+  const next = photoIndex + 1;
+  if (next >= photoQueue.length) {
+    clearPhotoQueue();
+    return false;
+  }
+  photoIndex = next;
+  showCurrentPhoto();
+  if (photoQueue[photoIndex].status === 'pending') {
+    processPhotoEntry(photoQueue[photoIndex]);
+  }
+  prefetchNextPhotos();
+  return true;
+}
+
+function reidentifyCurrentPhoto() {
+  const entry = photoQueue[photoIndex];
+  if (!entry) return;
+  // Always force multiple candidates on re-identify.
+  entry.status = 'pending';
+  entry.candidates = null;
+  entry.confidence = null;
+  entry.selectedIndex = 0;
+  processPhotoEntry(entry, { forceMultiple: true });
+}
+
+// Back-compat shim — the mobile single-photo button still calls into the
+// queue with a single file.
+async function handleGearPhotoFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  // Reset any prior queue (single-photo flow always starts fresh).
+  clearPhotoQueue();
+  await enqueuePhotos([file]);
 }
 
 // ------------------------------------------------------------------
@@ -1982,6 +2332,56 @@ function wire() {
     if (f) handleGearPhotoFile(f);
   });
 
+  // Photo workflow controls (re-identify, cancel, skip)
+  $('#photo-reidentify-btn').addEventListener('click', () => {
+    if (isPhotoFlowActive()) reidentifyCurrentPhoto();
+  });
+  $('#photo-cancel-btn').addEventListener('click', () => {
+    if (!isPhotoFlowActive()) return;
+    if (photoQueue.length > 1) {
+      // In a queue: treat as skip (mark current and advance).
+      photoQueue[photoIndex].status = 'skipped';
+      resetGearFormFields();
+      advancePhotoQueue();
+    } else {
+      // Single photo: just clear the workflow, keep modal open for manual entry.
+      clearPhotoQueue();
+      resetGearFormFields();
+    }
+  });
+  $('#gear-skip-btn').addEventListener('click', () => {
+    if (!isPhotoFlowActive()) return;
+    photoQueue[photoIndex].status = 'skipped';
+    resetGearFormFields();
+    advancePhotoQueue();
+  });
+
+  // Desktop multi-photo dropzone (drop or click to choose multiple files)
+  const upz = $('#upload-photos-dropzone');
+  const upInput = $('#upload-photos-input');
+  upz.addEventListener('click', () => upInput.click());
+  upz.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); upInput.click(); }
+  });
+  upInput.addEventListener('change', (e) => {
+    const fs = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (fs.length) enqueuePhotos(fs);
+  });
+  upz.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    upz.classList.add('drag-over');
+  });
+  upz.addEventListener('dragleave', () => upz.classList.remove('drag-over'));
+  upz.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.types.includes('Files')) return;
+    e.preventDefault();
+    upz.classList.remove('drag-over');
+    const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
+    if (fs.length) enqueuePhotos(fs);
+  });
+
   // Screenshot dropzone inside gear modal
   const dz = $('#screenshot-dropzone');
   const fileInput = $('#screenshot-file-input');
@@ -2056,8 +2456,14 @@ function wire() {
     e.preventDefault();
     dragDepth = 0;
     overlay.classList.remove('active');
-    const f = e.dataTransfer.files?.[0];
-    if (f && f.type.startsWith('image/')) handleScreenshotFile(f);
+    const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
+    if (fs.length === 0) return;
+    if (fs.length === 1) {
+      handleScreenshotFile(fs[0]);
+    } else {
+      // Multiple photos dropped → kick off the photo queue.
+      enqueuePhotos(fs);
+    }
   });
 }
 

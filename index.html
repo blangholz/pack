@@ -211,63 +211,101 @@
       </header>
 
       <div class="modal-body">
-        <!-- Mobile-only: identify gear from a photo -->
-        <div id="identify-photo-section" class="identify-photo-section">
-          <button id="identify-photo-btn" class="btn btn-primary identify-photo-btn" type="button">
-            <span class="identify-photo-icon" aria-hidden="true">📷</span>
-            <span>Identify gear from a photo</span>
-          </button>
-          <p id="identify-photo-status" class="field-hint muted identify-photo-status hidden" role="status" aria-live="polite"></p>
-          <input type="file" id="identify-photo-input" accept="image/*" capture="environment" class="hidden" />
-          <div class="identify-photo-divider"><span>or enter manually</span></div>
-        </div>
-
-        <!-- Section 1: Search -->
-        <div class="section-label">① Search for a product</div>
-        <div class="field gear-search-field">
-          <div class="input-row gear-search-row">
-            <input id="gear-search-input" type="search" autocomplete="off" placeholder="e.g. Petzl Sama harness" />
-            <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
+        <!-- Photo workflow (mobile single OR desktop multi-photo queue). Shown when active. -->
+        <section id="photo-workflow" class="photo-workflow hidden" aria-live="polite">
+          <div id="photo-workflow-progress" class="photo-workflow-progress hidden" role="status">
+            <span id="photo-workflow-progress-label">Photo 1 of 1</span>
+            <div class="photo-workflow-progress-dots" id="photo-workflow-progress-dots"></div>
           </div>
-          <div id="gear-search-suggestions" class="gear-search-suggestions hidden" role="listbox"></div>
-          <p id="gear-search-status" class="field-hint muted"></p>
-        </div>
-
-        <!-- Section 2: URL -->
-        <div class="section-label">② Or paste a product URL</div>
-        <div class="field">
-          <div class="input-row">
-            <input id="gear-url" type="url" placeholder="https://blackdiamondequipment.com/…" />
-            <button id="fetch-details-btn" class="btn btn-secondary">Fetch</button>
-          </div>
-          <p id="fetch-status" class="field-hint muted"></p>
-        </div>
-
-        <!-- Section 3: Screenshot (desktop / hover-pointer devices only) -->
-        <div class="screenshot-section-wrap">
-          <div class="section-label">③ Or drop a screenshot</div>
-          <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
-            <div class="dropzone-idle">
-              <div class="dropzone-icon">🖼️</div>
-              <div class="dropzone-title">Drop a product screenshot here</div>
-              <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+          <div class="photo-workflow-card">
+            <div class="photo-workflow-preview-wrap">
+              <img id="photo-workflow-preview" class="photo-workflow-preview" alt="Uploaded gear photo" />
             </div>
-            <div class="dropzone-preview hidden">
-              <img id="screenshot-preview" alt="Screenshot preview" />
-              <div class="dropzone-preview-row">
-                <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
-                  <span class="spinner-sm" aria-hidden="true"></span>
-                  <span id="screenshot-status">Reading the screenshot…</span>
-                </div>
-                <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+            <div class="photo-workflow-meta">
+              <div id="photo-workflow-status" class="photo-workflow-status"></div>
+              <div class="photo-workflow-actions">
+                <button id="photo-reidentify-btn" class="btn btn-ghost btn-sm hidden" type="button">↻ Try re-identify</button>
+                <button id="photo-cancel-btn" class="btn btn-ghost btn-sm hidden" type="button">Cancel photo</button>
               </div>
             </div>
           </div>
-          <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
+          <div id="photo-candidates" class="photo-candidates hidden">
+            <div class="photo-candidates-label" id="photo-candidates-label">Pick the closest match:</div>
+            <div id="photo-candidates-list" class="photo-candidates-list" role="radiogroup"></div>
+          </div>
+        </section>
+
+        <!-- Entry methods (search / URL / screenshot / photo-upload). Hidden while photo workflow is active. -->
+        <div id="gear-entry-methods">
+          <!-- Mobile-only: identify gear from a photo -->
+          <div id="identify-photo-section" class="identify-photo-section">
+            <button id="identify-photo-btn" class="btn btn-primary identify-photo-btn" type="button">
+              <span class="identify-photo-icon" aria-hidden="true">📷</span>
+              <span>Identify gear from a photo</span>
+            </button>
+            <p id="identify-photo-status" class="field-hint muted identify-photo-status hidden" role="status" aria-live="polite"></p>
+            <input type="file" id="identify-photo-input" accept="image/*" capture="environment" class="hidden" />
+            <div class="identify-photo-divider"><span>or enter manually</span></div>
+          </div>
+
+          <!-- Section 1: Search -->
+          <div class="section-label">① Search for a product</div>
+          <div class="field gear-search-field">
+            <div class="input-row gear-search-row">
+              <input id="gear-search-input" type="search" autocomplete="off" placeholder="e.g. Petzl Sama harness" />
+              <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
+            </div>
+            <div id="gear-search-suggestions" class="gear-search-suggestions hidden" role="listbox"></div>
+            <p id="gear-search-status" class="field-hint muted"></p>
+          </div>
+
+          <!-- Section 2: URL -->
+          <div class="section-label">② Or paste a product URL</div>
+          <div class="field">
+            <div class="input-row">
+              <input id="gear-url" type="url" placeholder="https://blackdiamondequipment.com/…" />
+              <button id="fetch-details-btn" class="btn btn-secondary">Fetch</button>
+            </div>
+            <p id="fetch-status" class="field-hint muted"></p>
+          </div>
+
+          <!-- Section 3: Screenshot (desktop / hover-pointer devices only) -->
+          <div class="screenshot-section-wrap">
+            <div class="section-label">③ Or drop a screenshot</div>
+            <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
+              <div class="dropzone-idle">
+                <div class="dropzone-icon">🖼️</div>
+                <div class="dropzone-title">Drop a product screenshot here</div>
+                <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+              </div>
+              <div class="dropzone-preview hidden">
+                <img id="screenshot-preview" alt="Screenshot preview" />
+                <div class="dropzone-preview-row">
+                  <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
+                    <span class="spinner-sm" aria-hidden="true"></span>
+                    <span id="screenshot-status">Reading the screenshot…</span>
+                  </div>
+                  <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+                </div>
+              </div>
+            </div>
+            <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
+          </div>
+
+          <!-- Section 3b: Multi-photo upload (desktop / hover-pointer only) -->
+          <div class="upload-photos-section-wrap">
+            <div class="section-label">④ Or upload photos of gear</div>
+            <div id="upload-photos-dropzone" class="upload-photos-dropzone" tabindex="0">
+              <div class="upload-photos-icon">📸</div>
+              <div class="upload-photos-title">Drop one or more gear photos here</div>
+              <div class="upload-photos-sub muted">we'll work through them one at a time · up to 12 at once</div>
+            </div>
+            <input type="file" id="upload-photos-input" accept="image/*" multiple class="hidden" />
+          </div>
         </div>
 
-        <!-- Section 4: Manual -->
-        <div class="section-label">④ Or edit details manually</div>
+        <!-- Section 4 (5 with new section): Manual -->
+        <div class="section-label" id="manual-section-label">⑤ Or edit details manually</div>
         <div class="form-grid">
           <div class="field">
             <label for="gear-name">Name</label>
@@ -315,7 +353,7 @@
 
       <footer class="modal-footer">
         <div class="spacer"></div>
-        <button class="btn btn-ghost" data-close="gear-modal">Cancel</button>
+        <button id="gear-skip-btn" class="btn btn-ghost hidden" type="button">Skip this photo</button>
         <button id="gear-delete-btn" class="btn btn-danger hidden">Delete</button>
         <button id="gear-save-btn" class="btn btn-primary">Save</button>
       </footer>
@@ -386,6 +424,16 @@
         <button class="btn btn-ghost" data-close="activity-modal">Cancel</button>
         <button id="activity-save-btn" class="btn btn-primary">Save</button>
       </footer>
+    </div>
+  </div>
+
+  <!-- Gear image preview (lightbox) — tapped from any thumbnail -->
+  <div id="image-preview-modal" class="modal hidden image-preview-modal" role="dialog" aria-modal="true" aria-label="Image preview">
+    <div class="modal-backdrop" data-close="image-preview-modal"></div>
+    <button class="image-preview-close icon-btn" data-close="image-preview-modal" aria-label="Close preview">×</button>
+    <div class="image-preview-body">
+      <img id="image-preview-img" alt="" />
+      <div id="image-preview-caption" class="image-preview-caption"></div>
     </div>
   </div>
 
