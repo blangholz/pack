@@ -350,15 +350,7 @@ function render() {
   renderWeatherFilter();
   renderActivity();
   renderUnitToggle();
-  renderMobileContext();
   $('#gear-weight-unit').textContent = displayUnit;
-}
-
-function renderMobileContext() {
-  const nameEl = $('#mobile-activity-context-name');
-  if (!nameEl) return;
-  const a = activeActivity();
-  nameEl.textContent = a ? `${a.emoji ? a.emoji + ' ' : ''}${a.name}` : 'Tap to pick / create';
 }
 
 function setMobileMode(mode) {
@@ -473,12 +465,11 @@ function gearCard(gear) {
   const addBtn = h('button', {
     class: 'gear-card-add-touch',
     type: 'button',
-    title: 'Add to current activity',
-    'aria-label': 'Add to current activity',
+    title: 'Add to a packing list',
+    'aria-label': 'Add to a packing list',
     onclick: (e) => {
       e.stopPropagation();
-      if (!activeActivityId) { toast('Pick an activity first', 'error'); return; }
-      addGearToActivity(activeActivityId, gear.id);
+      openActivityPicker(gear.id);
     },
   }, '+');
   const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight, addBtn);
@@ -1117,6 +1108,42 @@ function showModal(id) { $('#' + id).classList.remove('hidden'); }
 function hideModal(id) { $('#' + id).classList.add('hidden'); }
 
 // ------------------------------------------------------------------
+// Activity picker (mobile per-card "+" → choose which list)
+// ------------------------------------------------------------------
+function openActivityPicker(gearId) {
+  const gear = gearList.find((g) => g.id === gearId);
+  if (!gear) return;
+  $('#activity-picker-gear').textContent = gear.name || 'this item';
+
+  const list = $('#activity-picker-list');
+  list.innerHTML = '';
+  if (!activities.length) {
+    const empty = h('p', { class: 'muted activity-picker-empty' },
+      'You don\u2019t have any packing lists yet. Tap below to create one.');
+    list.appendChild(empty);
+  }
+  for (const a of activities) {
+    const inList = itemsFor(a.id).some((i) => i.gear_id === gearId);
+    const row = h('button', {
+      class: 'activity-picker-row' + (inList ? ' in-list' : ''),
+      type: 'button',
+      onclick: async () => {
+        hideModal('activity-picker');
+        await addGearToActivity(a.id, gearId);
+      },
+    },
+      h('span', { class: 'activity-picker-emoji' }, a.emoji || '🎒'),
+      h('span', { class: 'activity-picker-name' }, a.name),
+      inList
+        ? h('span', { class: 'activity-picker-badge' }, '✓ in list')
+        : h('span', { class: 'activity-picker-add' }, '+'),
+    );
+    list.appendChild(row);
+  }
+  showModal('activity-picker');
+}
+
+// ------------------------------------------------------------------
 // Gear modal (add / edit)
 // ------------------------------------------------------------------
 function resetGearForm() {
@@ -1645,7 +1672,13 @@ function wire() {
   for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-action="add-gear"]')) {
     tab.addEventListener('click', openAddGear);
   }
-  $('#mobile-activity-context')?.addEventListener('click', () => setMobileMode('packing'));
+
+  // Activity picker — "+ New packing list" jumps to packing tab and opens new-activity modal
+  $('#activity-picker-new').addEventListener('click', () => {
+    hideModal('activity-picker');
+    setMobileMode('packing');
+    openNewActivity();
+  });
 
   // Header
   $('#add-gear-btn').addEventListener('click', openAddGear);
