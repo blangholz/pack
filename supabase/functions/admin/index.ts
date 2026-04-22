@@ -22,7 +22,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
-  "access-control-allow-methods": "GET, OPTIONS",
+  "access-control-allow-methods": "GET, DELETE, OPTIONS",
 };
 
 function json(body: unknown, status = 200) {
@@ -350,9 +350,30 @@ async function viewDaily() {
   };
 }
 
+// DELETE /functions/v1/admin?id=<uuid>
+// Removes a user via the Supabase Auth Admin API (service role). Cascades
+// through every table whose FK references auth.users on delete cascade
+// (profiles, gear, activities, activity_items, activity_members, custom_filters).
+async function deleteUser(id: string): Promise<{ ok: true; id: string } | { error: string; status: number }> {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${id}`, {
+    method: "DELETE",
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY || "",
+      authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY || ""}`,
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return { error: `auth-admin-delete ${res.status}: ${body.slice(0, 200)}`, status: res.status };
+  }
+  return { ok: true, id };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
-  if (req.method !== "GET") return json({ error: "GET only" }, 405);
+  if (req.method !== "GET" && req.method !== "DELETE") {
+    return json({ error: "GET or DELETE only" }, 405);
+  }
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
     return json({ error: "Supabase env not configured" }, 500);
   }
@@ -378,8 +399,20 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url);
-  const view = url.searchParams.get("view") || "summary";
 
+  if (req.method === "DELETE") {
+    const id = url.searchParams.get("id") || "";
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Invalid user id" }, 400);
+    if (id === auth.userId) return json({ error: "Admins cannot delete their own account here." }, 400);
+    const result = await deleteUser(id);
+    if ("error" in result) {
+      console.error("[admin] delete failed:", result.error);
+      return json({ error: result.error }, result.status >= 400 && result.status < 600 ? result.status : 500);
+    }
+    return json(result);
+  }
+
+  const view = url.searchParams.get("view") || "summary";
   try {
     if (view === "summary") return json(await viewSummary());
     if (view === "users") return json(await viewUsers());

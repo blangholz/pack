@@ -3415,3 +3415,34 @@ body[data-view-mode="admin"] #admin-view { display: flex; }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+
+.admin-col-actions { width: 72px; text-align: right; }
+.admin-delete-btn {
+  appearance: none;
+  border: 1px solid var(--danger-border, var(--border));
+  background: transparent;
+  color: var(--danger, #dc2626);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 120ms ease, color 120ms ease;
+}
+.admin-delete-btn:hover {
+  background: var(--danger, #dc2626);
+  color: #fff;
+  border-color: var(--danger, #dc2626);
+}
+.admin-self-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}

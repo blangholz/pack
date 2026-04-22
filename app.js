@@ -2861,6 +2861,7 @@ function openNewActivity() {
   $('#activity-invite-emails').value = '';
   $('#activity-invite-field').classList.remove('hidden');
   $('#activity-delete-btn').classList.add('hidden');
+  $('#activity-leave-btn').classList.add('hidden');
   $('#activity-duplicate-btn').classList.add('hidden');
   // Share glyph only makes sense on existing lists.
   $('#activity-modal-share-btn').classList.add('hidden');
@@ -2883,7 +2884,9 @@ function openEditActivity(id) {
   // Hide the emails-on-create field when editing an existing list — use the
   // share modal for that instead.
   $('#activity-invite-field').classList.add('hidden');
-  $('#activity-delete-btn').classList.toggle('hidden', !isOwnerOf(id));
+  const owns = isOwnerOf(id);
+  $('#activity-delete-btn').classList.toggle('hidden', !owns);
+  $('#activity-leave-btn').classList.toggle('hidden', owns);
   $('#activity-duplicate-btn').classList.remove('hidden');
   // Show the share glyph for anyone — RLS gates what they can actually do.
   $('#activity-modal-share-btn').classList.remove('hidden');
@@ -3406,7 +3409,7 @@ async function removeMember(activityId, userId, name) {
 }
 
 async function handleLeaveActivity() {
-  const activityId = shareModalActivityId;
+  const activityId = shareModalActivityId || editingActivityId;
   if (!activityId || !currentUser) return;
   const a = activities.find((x) => x.id === activityId);
   if (!a) return;
@@ -3424,6 +3427,7 @@ async function handleLeaveActivity() {
   delete invitesByActivity[activityId];
   if (activeActivityId === activityId) activeActivityId = activities[0]?.id || null;
   hideModal('share-modal');
+  hideModal('activity-modal');
   shareModalActivityId = null;
   render();
   syncRealtimeSubscription();
@@ -4794,6 +4798,7 @@ function wire() {
   // Activity modal
   $('#activity-save-btn').addEventListener('click', handleSaveActivity);
   $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
+  $('#activity-leave-btn').addEventListener('click', handleLeaveActivity);
   $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
   $('#activity-done-btn').addEventListener('click', handleActivityDoneBtn);
   $('#activity-share-copy').addEventListener('click', handleActivityShareCopy);
@@ -5501,22 +5506,75 @@ function renderAdminUsers() {
     else th.removeAttribute('data-sort-dir');
   });
   tbody.innerHTML = '';
+  const selfId = currentUser?.id;
   for (const u of rows) {
     const tr = document.createElement('tr');
     tr.dataset.userId = u.id;
-    tr.addEventListener('click', () => openAdminUserDrawer(u.id));
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.admin-delete-btn')) return;
+      openAdminUserDrawer(u.id);
+    });
+    const isSelf = u.id === selfId;
     tr.innerHTML = `
-      <td>${escapeHtml(u.email || '—')}</td>
+      <td>${escapeHtml(u.email || '—')}${isSelf ? ' <span class="admin-self-tag">you</span>' : ''}</td>
       <td class="${u.display_name ? '' : 'admin-cell-muted'}">${escapeHtml(u.display_name || '—')}</td>
       <td class="admin-cell-muted">${fmtDate(u.created_at)}</td>
       <td class="admin-cell-muted">${fmtRelative(u.last_sign_in_at)}</td>
       <td class="num">${fmtInt(u.gear_count)}</td>
       <td class="num">${fmtInt(u.activities_count)}</td>
       <td class="num">${fmtInt(u.items_added_count)}</td>
+      <td class="admin-col-actions">${isSelf ? '' : `<button type="button" class="admin-delete-btn" title="Delete user account and all their data">Delete</button>`}</td>
     `;
+    const delBtn = tr.querySelector('.admin-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      confirmAndDeleteAdminUser(u);
+    });
     tbody.appendChild(tr);
   }
   if (empty) empty.hidden = rows.length > 0;
+}
+
+async function confirmAndDeleteAdminUser(user) {
+  const label = user.email || user.id;
+  const msg = `Delete ${label}?\n\nThis permanently removes their account, gear (${user.gear_count ?? 0}), lists (${user.activities_count ?? 0}), and all list items. This cannot be undone.\n\nType the email to confirm.`;
+  const answer = window.prompt(msg, '');
+  if (answer == null) return;
+  if (answer.trim().toLowerCase() !== String(user.email || '').trim().toLowerCase()) {
+    setStatus('Delete cancelled — email did not match.', 'error');
+    return;
+  }
+  try {
+    setStatus(`Deleting ${label}…`);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/admin?id=${encodeURIComponent(user.id)}`, {
+      method: 'DELETE',
+      headers: {
+        authorization: `Bearer ${session.access_token}`,
+        apikey: SUPABASE_ANON_KEY,
+      },
+    });
+    if (!res.ok) {
+      let err = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        err = body?.reason ? `${body.error || err} (${body.reason})` : (body?.error || err);
+      } catch {}
+      throw new Error(err);
+    }
+    adminUsers = adminUsers.filter((u) => u.id !== user.id);
+    if (adminDrawerUserId === user.id) closeAdminUserDrawer();
+    renderAdminUsers();
+    setStatus(`Deleted ${label}.`, 'success');
+    // Summary + daily counts need a refetch — cascade removed rows across
+    // multiple tables; Realtime deltas for service-role deletes aren't
+    // always prompt.
+    scheduleAdminRefetch();
+  } catch (err) {
+    console.error('[admin] delete failed', err);
+    setStatus(`Delete failed: ${err.message || err}`, 'error');
+  }
 }
 
 function renderAdminDaily() {
