@@ -79,16 +79,33 @@ function buildMeta({ title, description, url }) {
   ].join('\n    ');
 }
 
+// Strip any baseline og:*/twitter:*/description meta tags that index.html
+// carries for bare-URL unfurls, so our list-specific ones don't stack with
+// (and potentially lose to) the generic defaults. Most unfurl bots pick the
+// FIRST og:title they see; removing the baseline guarantees the dynamic one
+// wins regardless of insertion position.
+function stripBaselineMeta(html) {
+  // Tail pattern [ \t]*\n? only consumes trailing horizontal whitespace +
+  // the single line-ending newline. `\s*` here would greedily eat the next
+  // line's leading indent and break the next tag's line-start anchor —
+  // leaving every other baseline tag un-stripped.
+  return html
+    .replace(/^[ \t]*<meta\s+name="description"[^>]*>[ \t]*\n?/gmi, '')
+    .replace(/^[ \t]*<meta\s+property="og:[^"]*"[^>]*>[ \t]*\n?/gmi, '')
+    .replace(/^[ \t]*<meta\s+name="twitter:[^"]*"[^>]*>[ \t]*\n?/gmi, '');
+}
+
 function injectMeta(html, metaBlock) {
+  const stripped = stripBaselineMeta(html);
   // Insert right after </title>. If not found (shouldn't happen), fall back
   // to before </head>.
-  if (html.includes('</title>')) {
-    return html.replace('</title>', `</title>\n    ${metaBlock}`);
+  if (stripped.includes('</title>')) {
+    return stripped.replace('</title>', `</title>\n    ${metaBlock}`);
   }
-  if (html.includes('</head>')) {
-    return html.replace('</head>', `    ${metaBlock}\n  </head>`);
+  if (stripped.includes('</head>')) {
+    return stripped.replace('</head>', `    ${metaBlock}\n  </head>`);
   }
-  return html;
+  return stripped;
 }
 
 export default async function handler(req, res) {
