@@ -440,13 +440,16 @@ function renderBrandFilters() {
   host.classList.toggle('has-active', !!brandFilter);
 
   // Always render the pills into the DOM; mobile CSS controls whether the
-  // strip is visible. Force-open when a brand is actively filtering.
-  const showStrip = brandFilterExpanded || !!brandFilter;
+  // strip is visible. The user is in full control — tapping the toggle
+  // collapses even when a brand filter is active (the label still shows
+  // the active brand so they know filtering is on).
+  const showStrip = brandFilterExpanded;
   host.classList.toggle('expanded', showStrip);
   toggle.setAttribute('aria-expanded', showStrip ? 'true' : 'false');
+  const arrow = showStrip ? '▴' : '▾';
   toggle.textContent = brandFilter
-    ? `Filtering by ${counts.get(brandFilter)?.label || brandFilter} ▴`
-    : (showStrip ? 'Filter by brand ▴' : 'Filter by brand ▾');
+    ? `Filtering by ${counts.get(brandFilter)?.label || brandFilter} ${arrow}`
+    : `Filter by brand ${arrow}`;
 
   const entries = Array.from(counts.entries()).sort((a, b) => b[1].count - a[1].count);
   for (const [key, { label, count }] of entries) {
