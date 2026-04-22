@@ -5143,6 +5143,661 @@ function handleShareLinkCopy() {
 }
 
 // ------------------------------------------------------------------
+// Bulk import — CSV / screenshot / PDF / paste → classify → enrich →
+// review → bulk insert. Reuses callExtractGear (with new 'classify' and
+// 'batchEnrich' modes on the edge function) + the existing gear insert
+// path. Volume target: tens typical, hundreds max.
+// ------------------------------------------------------------------
+const BULK_CLASSIFY_BATCH = 50;
+const BULK_ENRICH_BATCH = 10;
+
+// In-memory state for the current bulk-import session. Scoped to the modal —
+// reset on each open. `aborted` is flipped by the cancel button to short-
+// circuit the pipeline after the in-flight call returns.
+let bulkState = null;
+
+function resetBulkState() {
+  bulkState = {
+    rows: [],          // [{title, brand?, url?, source?, category?}]
+    classified: [],    // [{index, isGear, confidence, reason?}]
+    enriched: [],      // [{index, data: {name,brand,weightGrams,quantity,url,imageUrl,notes}}]
+    candidates: [],    // Merged candidates for review (gear only).
+    notGear: [],       // Rows classified as non-gear (collapsed list for review).
+    total: 0,
+    done: 0,
+    aborted: false,
+  };
+}
+
+function setBulkStep(step) {
+  const modal = $('#bulk-import-modal');
+  modal.setAttribute('data-step', step);
+  // Back button is visible on parse + review so the user can start over.
+  const back = $('#bulk-back-btn');
+  if (back) back.classList.toggle('hidden', step === 'drop');
+  const commit = $('#bulk-commit-btn');
+  if (commit) commit.classList.toggle('hidden', step !== 'review');
+}
+
+function openBulkImport() {
+  resetBulkState();
+  $('#bulk-paste-wrap').classList.add('hidden');
+  $('#bulk-paste-textarea').value = '';
+  $('#bulk-drop-status').textContent = '';
+  $('#bulk-drop-status').classList.remove('error');
+  setBulkStep('drop');
+  showModal('bulk-import-modal');
+}
+
+// --- CSV parser (RFC-4180, handles quoted fields w/ commas + escaped quotes)
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; }
+        else inQuotes = false;
+      } else cur += ch;
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { row.push(cur); cur = ''; }
+      else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+      else if (ch === '\r') { /* swallow — \r\n handled by the \n branch */ }
+      else cur += ch;
+    }
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter((r) => r.some((c) => String(c).trim().length));
+}
+
+// Map header row to column indices using case-insensitive substring matching,
+// so Amazon, REI, Backcountry, Moosejaw exports all work from the same code.
+function mapCsvColumns(header) {
+  const lc = header.map((h) => String(h).toLowerCase().trim());
+  const find = (...needles) => {
+    for (let i = 0; i < lc.length; i++) {
+      if (needles.some((n) => lc[i].includes(n))) return i;
+    }
+    return -1;
+  };
+  return {
+    title: find('title', 'product name', 'item name', 'description'),
+    category: find('category', 'product group'),
+    asin: find('asin'),
+    url: find('url', 'link'),
+    orderDate: find('order date', 'purchase date', 'date'),
+    price: find('purchase price per unit', 'price', 'item total'),
+    quantity: find('quantity', 'qty'),
+    seller: find('seller', 'vendor', 'website'),
+  };
+}
+
+function rowsFromCsv(text) {
+  const parsed = parseCsv(text);
+  if (parsed.length < 2) return [];
+  const header = parsed[0];
+  const cols = mapCsvColumns(header);
+  if (cols.title < 0) return [];
+  const out = [];
+  for (let i = 1; i < parsed.length; i++) {
+    const r = parsed[i];
+    const title = String(r[cols.title] || '').trim();
+    if (!title) continue;
+    const asin = cols.asin >= 0 ? String(r[cols.asin] || '').trim() : '';
+    const seller = cols.seller >= 0 ? String(r[cols.seller] || '').trim() : '';
+    const url = asin ? `https://amazon.com/dp/${asin}` :
+      (cols.url >= 0 ? String(r[cols.url] || '').trim() : '');
+    const orderDate = cols.orderDate >= 0 ? String(r[cols.orderDate] || '').trim() : '';
+    const price = cols.price >= 0 ? String(r[cols.price] || '').trim() : '';
+    const srcParts = [];
+    if (orderDate) srcParts.push(orderDate);
+    if (seller) srcParts.push(seller);
+    if (price) srcParts.push(price);
+    out.push({
+      title,
+      category: cols.category >= 0 ? String(r[cols.category] || '').trim() : '',
+      url,
+      source: srcParts.join(' · '),
+      quantity: cols.quantity >= 0 ? Number(r[cols.quantity]) || 1 : 1,
+    });
+  }
+  return out;
+}
+
+function rowsFromPasteText(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((title) => ({ title, category: '', url: '', source: 'pasted', quantity: 1 }));
+}
+
+async function startBulkPipelineFromRows(rawRows) {
+  if (!rawRows.length) {
+    const status = $('#bulk-drop-status');
+    status.textContent = 'Could not find any rows in that input.';
+    status.classList.add('error');
+    return;
+  }
+  resetBulkState();
+  bulkState.rows = rawRows;
+  bulkState.total = rawRows.length;
+  setBulkStep('parse');
+  $('#bulk-progress-title').textContent = `Looking at ${rawRows.length} item${rawRows.length === 1 ? '' : 's'}…`;
+  $('#bulk-progress-sub').textContent = 'Step 1/2: filtering out non-gear';
+  $('#bulk-progress-fill').style.width = '0%';
+
+  try {
+    await runClassifyPass();
+    if (bulkState.aborted) return finalizeReview();
+    await runEnrichPass();
+    if (bulkState.aborted) return finalizeReview();
+    finalizeReview();
+  } catch (err) {
+    console.error('[bulk-import] pipeline failed', err);
+    const status = $('#bulk-drop-status');
+    status.textContent = err.message || 'Bulk import failed.';
+    status.classList.add('error');
+    setBulkStep('drop');
+  }
+}
+
+async function runClassifyPass() {
+  const rows = bulkState.rows;
+  const results = [];
+  for (let i = 0; i < rows.length; i += BULK_CLASSIFY_BATCH) {
+    if (bulkState.aborted) break;
+    const chunk = rows.slice(i, i + BULK_CLASSIFY_BATCH).map((r) => ({
+      title: r.title, category: r.category || null, vendor: r.seller || null,
+    }));
+    try {
+      const res = await callExtractGear({ classify: { rows: chunk } });
+      const chunkResults = Array.isArray(res.results) ? res.results : [];
+      for (const r of chunkResults) {
+        if (typeof r.index === 'number') {
+          results.push({ ...r, index: i + r.index });
+        }
+      }
+    } catch (err) {
+      // On classify failure, treat everything in the chunk as likely-gear so
+      // the user still gets a chance to review rather than losing the rows.
+      for (let j = 0; j < chunk.length; j++) {
+        results.push({ index: i + j, isGear: true, confidence: 0.3, reason: 'classify-failed' });
+      }
+    }
+    bulkState.done = Math.min(rows.length, i + BULK_CLASSIFY_BATCH);
+    const pct = (bulkState.done / rows.length) * 50; // classify is first half
+    $('#bulk-progress-fill').style.width = `${pct}%`;
+    $('#bulk-progress-sub').textContent = `Step 1/2: filtered ${bulkState.done} of ${rows.length}`;
+  }
+  bulkState.classified = results;
+}
+
+async function runEnrichPass() {
+  const rows = bulkState.rows;
+  const gearIndexes = bulkState.classified
+    .filter((c) => c.isGear)
+    .map((c) => c.index);
+  const notGearIndexes = bulkState.classified
+    .filter((c) => !c.isGear)
+    .map((c) => c.index);
+
+  // Collect non-gear candidates upfront so they appear in the review list
+  // (collapsed). Users can promote them if Claude misclassified.
+  bulkState.notGear = notGearIndexes.map((idx) => ({
+    sourceIndex: idx,
+    title: rows[idx].title,
+    source: rows[idx].source || '',
+    url: rows[idx].url || '',
+  }));
+
+  const gearRows = gearIndexes.map((idx) => ({
+    index: idx,
+    title: rows[idx].title,
+    url: rows[idx].url || null,
+    vendor: rows[idx].seller || null,
+  }));
+
+  $('#bulk-progress-title').textContent = `Enriching ${gearRows.length} item${gearRows.length === 1 ? '' : 's'}…`;
+  $('#bulk-progress-sub').textContent = 'Step 2/2: fetching names, brands, weights';
+
+  const enriched = [];
+  for (let i = 0; i < gearRows.length; i += BULK_ENRICH_BATCH) {
+    if (bulkState.aborted) break;
+    const chunk = gearRows.slice(i, i + BULK_ENRICH_BATCH).map((g) => ({
+      title: g.title, url: g.url, vendor: g.vendor,
+    }));
+    try {
+      const res = await callExtractGear({ batchEnrich: { rows: chunk } });
+      const chunkResults = Array.isArray(res.results) ? res.results : [];
+      for (const r of chunkResults) {
+        if (typeof r.index !== 'number') continue;
+        const sourceIndex = gearRows[i + r.index]?.index;
+        if (sourceIndex == null) continue;
+        enriched.push({ sourceIndex, data: r.data || {} });
+      }
+    } catch (err) {
+      // On enrich failure, fall back to the raw title so the row is still
+      // importable. The user can edit before committing.
+      for (const g of chunk) {
+        const sourceIndex = g._idx != null ? g._idx : null;
+      }
+      for (let j = 0; j < chunk.length; j++) {
+        const sourceIndex = gearRows[i + j]?.index;
+        if (sourceIndex == null) continue;
+        enriched.push({
+          sourceIndex,
+          data: { name: rows[sourceIndex].title, brand: null, weightGrams: null, imageUrl: null, url: rows[sourceIndex].url || null },
+        });
+      }
+    }
+    const doneThis = Math.min(gearRows.length, i + BULK_ENRICH_BATCH);
+    const pct = 50 + (doneThis / Math.max(1, gearRows.length)) * 50;
+    $('#bulk-progress-fill').style.width = `${pct}%`;
+    $('#bulk-progress-sub').textContent = `Step 2/2: enriched ${doneThis} of ${gearRows.length}`;
+  }
+  bulkState.enriched = enriched;
+}
+
+function finalizeReview() {
+  const rows = bulkState.rows;
+  const candidates = bulkState.enriched.map((e) => {
+    const src = rows[e.sourceIndex] || {};
+    const d = e.data || {};
+    return {
+      sourceIndex: e.sourceIndex,
+      checked: true,
+      name: (d.name || src.title || '').toString().trim(),
+      brand: (d.brand || '').toString().trim(),
+      weightGrams: d.weightGrams != null ? Number(d.weightGrams) : null,
+      quantity: d.quantity || src.quantity || 1,
+      url: d.url || src.url || '',
+      imageUrl: d.imageUrl || '',
+      notes: d.notes || '',
+      source: src.source || '',
+      isDupe: false,
+    };
+  });
+
+  // Fuzzy-dedupe against existing library: exact name match (case-insensitive)
+  // OR same brand + one name contains the other. Mark as dupe and uncheck.
+  const libByName = new Map();
+  for (const g of gearList) {
+    const key = String(g.name || '').toLowerCase().trim();
+    if (key) libByName.set(key, g);
+  }
+  for (const c of candidates) {
+    const nameKey = c.name.toLowerCase().trim();
+    if (!nameKey) continue;
+    if (libByName.has(nameKey)) {
+      c.isDupe = true;
+      c.checked = false;
+      continue;
+    }
+    if (c.brand) {
+      for (const g of gearList) {
+        const gName = String(g.name || '').toLowerCase().trim();
+        const gBrand = String(g.brand || '').toLowerCase().trim();
+        if (gBrand && gBrand === c.brand.toLowerCase().trim()) {
+          if (gName.includes(nameKey) || nameKey.includes(gName)) {
+            c.isDupe = true;
+            c.checked = false;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  bulkState.candidates = candidates;
+  renderBulkReview();
+  setBulkStep('review');
+}
+
+function renderBulkReview() {
+  const list = $('#bulk-review-list');
+  list.innerHTML = '';
+  const cands = bulkState.candidates;
+  for (let i = 0; i < cands.length; i++) {
+    list.appendChild(bulkReviewRow(cands[i], i));
+  }
+
+  // Not-gear collapsed section
+  const ng = bulkState.notGear;
+  const wrap = $('#bulk-notgear-wrap');
+  const countEl = $('#bulk-notgear-count');
+  const ngList = $('#bulk-notgear-list');
+  ngList.innerHTML = '';
+  if (ng.length) {
+    countEl.textContent = String(ng.length);
+    wrap.hidden = false;
+    for (const n of ng) {
+      const row = h('div', { class: 'bulk-review-row is-unchecked' });
+      const check = h('input', { type: 'checkbox', class: 'bulk-review-check' });
+      check.addEventListener('change', () => {
+        if (check.checked) promoteNotGearToReview(n.sourceIndex);
+      });
+      const thumb = h('div', { class: 'bulk-review-thumb' }, initialsFrom(n.title));
+      const main = h('div', { class: 'bulk-review-main' });
+      main.appendChild(h('div', { class: 'bulk-review-name', style: 'padding:2px 4px' }, n.title));
+      main.appendChild(h('div', { class: 'bulk-review-meta' },
+        h('span', { class: 'bulk-review-source' }, n.source || 'not likely gear')));
+      row.appendChild(check);
+      row.appendChild(thumb);
+      row.appendChild(main);
+      row.appendChild(h('span', {}, ''));
+      ngList.appendChild(row);
+    }
+  } else {
+    wrap.hidden = true;
+    countEl.textContent = '0';
+  }
+  updateBulkReviewCounter();
+}
+
+function bulkReviewRow(cand, idx) {
+  const row = h('div', { class: `bulk-review-row${cand.isDupe ? ' is-dupe' : ''}${cand.checked ? '' : ' is-unchecked'}` });
+
+  const check = h('input', { type: 'checkbox', class: 'bulk-review-check' });
+  check.checked = cand.checked;
+  check.addEventListener('change', () => {
+    cand.checked = check.checked;
+    row.classList.toggle('is-unchecked', !cand.checked);
+    updateBulkReviewCounter();
+  });
+
+  const thumb = h('div', { class: 'bulk-review-thumb' });
+  if (cand.imageUrl) {
+    const img = h('img', { src: cand.imageUrl, alt: '', loading: 'lazy' });
+    img.addEventListener('error', () => {
+      thumb.innerHTML = '';
+      thumb.textContent = initialsFrom(cand.name || cand.brand || '?');
+    });
+    thumb.appendChild(img);
+  } else {
+    thumb.textContent = initialsFrom(cand.name || cand.brand || '?');
+  }
+
+  const main = h('div', { class: 'bulk-review-main' });
+  const nameInput = h('input', { type: 'text', class: 'bulk-review-name', value: cand.name, placeholder: 'Name' });
+  nameInput.addEventListener('input', () => { cand.name = nameInput.value; });
+  main.appendChild(nameInput);
+
+  const meta = h('div', { class: 'bulk-review-meta' });
+  const brandInput = h('input', { type: 'text', class: 'brand', value: cand.brand || '', placeholder: 'Brand' });
+  brandInput.addEventListener('input', () => { cand.brand = brandInput.value; });
+  meta.appendChild(brandInput);
+
+  const weightWrap = h('span', {},
+    (() => {
+      const w = h('input', {
+        type: 'number', class: 'weight', min: '0', step: '1',
+        value: cand.weightGrams != null ? String(Math.round(cand.weightGrams)) : '',
+        placeholder: '—',
+      });
+      w.addEventListener('input', () => {
+        const v = w.value.trim();
+        cand.weightGrams = v ? Number(v) : null;
+      });
+      return w;
+    })(),
+    ' g'
+  );
+  meta.appendChild(weightWrap);
+
+  if (cand.source) meta.appendChild(h('span', { class: 'bulk-review-source' }, cand.source));
+  if (cand.isDupe) meta.appendChild(h('span', { class: 'bulk-review-dupe-tag' }, 'Already in library'));
+
+  main.appendChild(meta);
+
+  const remove = h('button', { type: 'button', class: 'bulk-review-remove', title: 'Remove', 'aria-label': 'Remove' }, '×');
+  remove.addEventListener('click', () => {
+    bulkState.candidates.splice(idx, 1);
+    renderBulkReview();
+  });
+
+  row.appendChild(check);
+  row.appendChild(thumb);
+  row.appendChild(main);
+  row.appendChild(remove);
+  return row;
+}
+
+function promoteNotGearToReview(sourceIndex) {
+  const ngIdx = bulkState.notGear.findIndex((n) => n.sourceIndex === sourceIndex);
+  if (ngIdx < 0) return;
+  const n = bulkState.notGear.splice(ngIdx, 1)[0];
+  bulkState.candidates.push({
+    sourceIndex,
+    checked: true,
+    name: n.title,
+    brand: '',
+    weightGrams: null,
+    quantity: 1,
+    url: n.url || '',
+    imageUrl: '',
+    notes: '',
+    source: n.source || '',
+    isDupe: false,
+  });
+  renderBulkReview();
+}
+
+function updateBulkReviewCounter() {
+  const selected = bulkState.candidates.filter((c) => c.checked).length;
+  $('#bulk-review-counter').textContent = `${selected} selected`;
+  const commit = $('#bulk-commit-btn');
+  commit.textContent = `Import ${selected} item${selected === 1 ? '' : 's'}`;
+  commit.disabled = selected === 0;
+}
+
+async function handleBulkCommit() {
+  const selected = bulkState.candidates.filter((c) => c.checked && (c.name || '').trim());
+  if (!selected.length) return;
+  const commit = $('#bulk-commit-btn');
+  commit.disabled = true;
+  commit.textContent = 'Importing…';
+
+  const payload = selected.map((c) => {
+    const notes = [];
+    if (c.source) notes.push(c.source);
+    if (c.notes) notes.push(c.notes);
+    return {
+      name: c.name.trim(),
+      brand: (c.brand || '').trim() || null,
+      weight_grams: c.weightGrams != null ? Number(c.weightGrams) : null,
+      quantity: c.quantity || 1,
+      url: (c.url || '').trim() || null,
+      image_url: (c.imageUrl || '').trim() || null,
+      notes: notes.join(' · ') || null,
+    };
+  });
+
+  const { data, error } = await supabase.from('gear').insert(payload).select();
+  if (error) {
+    toast(error.message || 'Bulk import failed', 'error');
+    commit.disabled = false;
+    updateBulkReviewCounter();
+    return;
+  }
+  // Dedupe against realtime echo that may have already landed.
+  const existingIds = new Set(gearList.map((g) => g.id));
+  for (const row of (data || [])) {
+    if (!existingIds.has(row.id)) gearList.unshift(row);
+  }
+  hideModal('bulk-import-modal');
+  toast(`Added ${payload.length} item${payload.length === 1 ? '' : 's'} to your library`, 'success');
+  setMobileMode('library');
+  render();
+  // Background-enrich thumbnails for items that came back without one.
+  for (const row of (data || [])) {
+    if (row && !row.image_url && row.name) {
+      backgroundEnrichThumbnail(row).catch(() => {});
+    }
+  }
+}
+
+// --- File handling ----------------------------------------------------------
+
+async function handleBulkFiles(files) {
+  const status = $('#bulk-drop-status');
+  status.textContent = '';
+  status.classList.remove('error');
+  if (!files?.length) return;
+
+  // Enforce sane caps so an accidental big drop doesn't spin forever.
+  const MAX_FILE_MB = 10;
+  const MAX_TOTAL_MB = 50;
+  let total = 0;
+  for (const f of files) {
+    total += f.size;
+    if (f.size > MAX_FILE_MB * 1024 * 1024) {
+      status.textContent = `"${f.name}" is larger than ${MAX_FILE_MB} MB — try a smaller file.`;
+      status.classList.add('error');
+      return;
+    }
+  }
+  if (total > MAX_TOTAL_MB * 1024 * 1024) {
+    status.textContent = `Total upload is larger than ${MAX_TOTAL_MB} MB — split it into smaller batches.`;
+    status.classList.add('error');
+    return;
+  }
+
+  // Collect rows from each file, by type.
+  const allRows = [];
+  for (const f of files) {
+    const name = (f.name || '').toLowerCase();
+    if (name.endsWith('.csv') || f.type === 'text/csv') {
+      const text = await f.text();
+      const rows = rowsFromCsv(text);
+      allRows.push(...rows);
+    } else if (f.type.startsWith('image/') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')) {
+      // Screenshot path — extract-gear already supports multi-candidate
+      // extraction from a screenshot image. Skip classify+enrich for these
+      // rows since the edge function returned gear shape directly.
+      const b64 = await fileToBase64(f);
+      const mediaType = f.type || 'image/png';
+      try {
+        const res = await callExtractGear({
+          image: { base64: b64, mediaType },
+          mode: 'screenshot',
+          forceMultiple: true,
+        });
+        const cands = Array.isArray(res.candidates) ? res.candidates : (res.data ? [res.data] : []);
+        for (const c of cands) {
+          if (!c) continue;
+          allRows.push({
+            title: c.name || '(unnamed)',
+            category: '',
+            url: c.url || '',
+            source: `From screenshot: ${f.name}`,
+            quantity: c.quantity || 1,
+            _preEnriched: { data: c },
+          });
+        }
+      } catch (err) {
+        console.warn('[bulk-import] screenshot failed', f.name, err);
+      }
+    } else if (f.type === 'application/pdf' || name.endsWith('.pdf')) {
+      // PDF parsing not yet supported — tell the user instead of silently
+      // skipping. Export a CSV or take a screenshot instead.
+      status.textContent = `PDF import isn't supported yet — for "${f.name}", try a CSV export or a screenshot instead.`;
+      status.classList.add('error');
+    }
+  }
+
+  if (!allRows.length) {
+    status.textContent = 'Could not extract any rows from the input. Try a CSV or a screenshot.';
+    status.classList.add('error');
+    return;
+  }
+
+  // If every row has _preEnriched (screenshot/PDF), skip classify+enrich and go
+  // straight to review — the edge function already returned gear shape.
+  const allPre = allRows.every((r) => r._preEnriched);
+  if (allPre) {
+    resetBulkState();
+    bulkState.rows = allRows;
+    bulkState.total = allRows.length;
+    bulkState.classified = allRows.map((_, i) => ({ index: i, isGear: true, confidence: 1 }));
+    bulkState.enriched = allRows.map((r, i) => ({ sourceIndex: i, data: r._preEnriched.data }));
+    finalizeReview();
+    return;
+  }
+  await startBulkPipelineFromRows(allRows);
+}
+
+function fileToDataUrl(f) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result || ''));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(f);
+  });
+}
+
+function fileToBase64(f) {
+  return fileToDataUrl(f).then((u) => {
+    const i = u.indexOf(',');
+    return i >= 0 ? u.slice(i + 1) : u;
+  });
+}
+
+// ------------------------------------------------------------------
+// Settings modal (desktop) + mobile Gmail upsell
+// ------------------------------------------------------------------
+function buildGmailUpsellCard() {
+  const card = h('div', { class: 'gmail-upsell' });
+  const header = h('div', { class: 'gmail-upsell-header' });
+  header.appendChild(h('div', { class: 'gmail-upsell-icon' }, '✉️'));
+  header.appendChild(h('div', { class: 'gmail-upsell-title' },
+    'Import from Gmail',
+    h('span', { class: 'gmail-upsell-badge' }, 'Coming soon'),
+  ));
+  card.appendChild(header);
+  card.appendChild(h('p', { class: 'gmail-upsell-body' },
+    'Let Pack search your inbox for order confirmations from Amazon, REI, Backcountry, and more — and pull new gear into your library automatically. ',
+    h('span', { class: 'muted' }, 'We\'ll only look at shipping and order emails, never anything personal.'),
+  ));
+  const btn = h('button', { type: 'button', class: 'btn btn-ghost', disabled: true }, 'Notify me when ready');
+  card.appendChild(btn);
+  return card;
+}
+
+function renderSettingsModalBody() {
+  const body = $('#settings-modal-body') || $('#settings-modal .settings-modal-body');
+  if (!body) return;
+  body.innerHTML = '';
+
+  const acctSection = h('div', { class: 'settings-section' });
+  acctSection.appendChild(h('h4', { class: 'settings-section-title' }, 'Account'));
+  const email = currentUser?.email || '';
+  acctSection.appendChild(h('div', { style: 'font-size:13px' }, email || '—'));
+  body.appendChild(acctSection);
+
+  const importSection = h('div', { class: 'settings-section' });
+  importSection.appendChild(h('h4', { class: 'settings-section-title' }, 'Import'));
+  importSection.appendChild(buildGmailUpsellCard());
+  body.appendChild(importSection);
+}
+
+function openSettingsModal() {
+  renderSettingsModalBody();
+  showModal('settings-modal');
+}
+
+function renderMobileGmailUpsell() {
+  const slot = $('#mobile-gmail-upsell-slot');
+  if (!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildGmailUpsellCard());
+}
+
+// ------------------------------------------------------------------
 // Wiring
 // ------------------------------------------------------------------
 function wire() {
@@ -5167,6 +5822,80 @@ function wire() {
   $('#add-gear-btn').addEventListener('click', openAddGear);
   $('#add-gear-btn-library').addEventListener('click', openAddGear);
   $('#gear-empty-add-btn').addEventListener('click', openAddGear);
+  const settingsBtn = $('#settings-btn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+
+  // Bulk import
+  const bulkBtn = $('#bulk-import-btn');
+  if (bulkBtn) bulkBtn.addEventListener('click', openBulkImport);
+  const bulkChoose = $('#bulk-choose-files-btn');
+  const bulkFileInput = $('#bulk-file-input');
+  if (bulkChoose && bulkFileInput) {
+    bulkChoose.addEventListener('click', () => bulkFileInput.click());
+    bulkFileInput.addEventListener('change', async (e) => {
+      const fs = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (fs.length) await handleBulkFiles(fs);
+    });
+  }
+  const bulkDz = $('#bulk-dropzone');
+  if (bulkDz) {
+    bulkDz.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      bulkDz.classList.add('drag-over');
+    });
+    bulkDz.addEventListener('dragleave', () => bulkDz.classList.remove('drag-over'));
+    bulkDz.addEventListener('drop', (e) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      bulkDz.classList.remove('drag-over');
+      const fs = Array.from(e.dataTransfer.files || []);
+      if (fs.length) handleBulkFiles(fs);
+    });
+  }
+  const bulkPasteToggle = $('#bulk-paste-toggle');
+  if (bulkPasteToggle) {
+    bulkPasteToggle.addEventListener('click', () => {
+      const wrap = $('#bulk-paste-wrap');
+      wrap.classList.toggle('hidden');
+      if (!wrap.classList.contains('hidden')) $('#bulk-paste-textarea').focus();
+    });
+  }
+  const bulkPasteSubmit = $('#bulk-paste-submit');
+  if (bulkPasteSubmit) {
+    bulkPasteSubmit.addEventListener('click', async () => {
+      const text = $('#bulk-paste-textarea').value;
+      const rows = rowsFromPasteText(text);
+      await startBulkPipelineFromRows(rows);
+    });
+  }
+  const bulkCancel = $('#bulk-cancel-btn');
+  if (bulkCancel) {
+    bulkCancel.addEventListener('click', () => {
+      if (!bulkState) return;
+      bulkState.aborted = true;
+      // If we've already enriched anything, let the user review it; otherwise
+      // drop back to the dropzone.
+      if (bulkState.enriched.length) finalizeReview();
+      else setBulkStep('drop');
+    });
+  }
+  const bulkBack = $('#bulk-back-btn');
+  if (bulkBack) bulkBack.addEventListener('click', () => setBulkStep('drop'));
+  const bulkSelAll = $('#bulk-select-all-btn');
+  const bulkSelNone = $('#bulk-select-none-btn');
+  if (bulkSelAll) bulkSelAll.addEventListener('click', () => {
+    for (const c of bulkState.candidates) c.checked = true;
+    renderBulkReview();
+  });
+  if (bulkSelNone) bulkSelNone.addEventListener('click', () => {
+    for (const c of bulkState.candidates) c.checked = false;
+    renderBulkReview();
+  });
+  const bulkCommit = $('#bulk-commit-btn');
+  if (bulkCommit) bulkCommit.addEventListener('click', handleBulkCommit);
   // Gear-empty suggestion chips: open Add Gear with the name prefilled.
   const gearSuggestions = $('#gear-empty-suggestions');
   if (gearSuggestions) {
@@ -5600,6 +6329,7 @@ async function onSignedIn(session) {
   $('#user-email').textContent = currentUser.email || '';
   const mobileEmailEl = $('#mobile-settings-email');
   if (mobileEmailEl) mobileEmailEl.textContent = currentUser.email || '';
+  renderMobileGmailUpsell();
   showMain();
   await syncDisplayName(currentUser);
   await loadAll();

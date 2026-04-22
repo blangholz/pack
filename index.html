@@ -194,6 +194,7 @@
       </button>
       <div class="header-actions">
         <span id="user-email" class="muted" style="margin-right: 4px;"></span>
+        <button id="settings-btn" class="icon-btn desktop-only" title="Settings" aria-label="Settings">⚙</button>
         <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
         <button id="sign-out-btn" class="btn btn-ghost" title="Sign out">Sign out</button>
         <button id="add-gear-btn" class="btn btn-primary mobile-only" aria-label="Add gear"><span class="btn-text-mobile" aria-hidden="true">+</span></button>
@@ -207,6 +208,7 @@
           <h2>Gear Library</h2>
           <div class="library-header-right">
             <span id="gear-count" class="muted"></span>
+            <button id="bulk-import-btn" class="btn btn-ghost btn-sm" type="button" title="Import many items at once">Import</button>
             <button id="library-edit-toggle" class="btn btn-ghost btn-sm" type="button" aria-pressed="false">Edit</button>
           </div>
         </div>
@@ -293,6 +295,7 @@
             <span class="mobile-settings-label muted">Signed in as</span>
             <span id="mobile-settings-email" class="mobile-settings-value"></span>
           </div>
+          <div id="mobile-gmail-upsell-slot"></div>
           <button id="mobile-sign-out-btn" class="btn btn-secondary mobile-settings-signout" type="button">Sign out</button>
         </div>
       </section>
@@ -689,6 +692,83 @@
         <button id="activity-cancel-btn" class="btn btn-ghost" data-close="activity-modal">Cancel</button>
         <button id="activity-save-btn" class="btn btn-primary">Save</button>
       </footer>
+    </div>
+  </div>
+
+  <!-- Bulk import modal: CSV / screenshot / paste → classify → enrich → review → bulk insert -->
+  <div id="bulk-import-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="bulk-import-title" data-step="drop">
+    <div class="modal-backdrop" data-close="bulk-import-modal"></div>
+    <div class="modal-panel modal-wide bulk-import-panel">
+      <header class="modal-header">
+        <h3 id="bulk-import-title">Import gear</h3>
+        <button class="icon-btn" data-close="bulk-import-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body bulk-import-body">
+
+        <!-- Step 1: drop zone / paste -->
+        <div class="bulk-step bulk-step-drop" data-step="drop">
+          <div id="bulk-dropzone" class="bulk-dropzone" tabindex="0">
+            <div class="bulk-dropzone-icon" aria-hidden="true">📥</div>
+            <p class="bulk-dropzone-title">Drop a CSV, screenshot, or PDF here</p>
+            <p class="muted bulk-dropzone-hint">
+              Works with Amazon Order Reports (CSV), screenshots of order pages, or receipt PDFs from any retailer.
+            </p>
+            <div class="bulk-dropzone-actions">
+              <button type="button" id="bulk-choose-files-btn" class="btn btn-primary">Choose files</button>
+              <button type="button" id="bulk-paste-toggle" class="btn btn-ghost">Or paste text</button>
+            </div>
+            <input id="bulk-file-input" type="file" accept=".csv,image/*,application/pdf" multiple hidden />
+          </div>
+          <div id="bulk-paste-wrap" class="bulk-paste-wrap hidden">
+            <label for="bulk-paste-textarea">Paste order lines, one per line:</label>
+            <textarea id="bulk-paste-textarea" rows="6" placeholder="e.g.&#10;Patagonia Houdini Jacket&#10;Black Diamond Momentum Harness&#10;Petzl Actik Headlamp"></textarea>
+            <button type="button" id="bulk-paste-submit" class="btn btn-primary">Parse text</button>
+          </div>
+          <p id="bulk-drop-status" class="muted bulk-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <!-- Step 2: parsing progress -->
+        <div class="bulk-step bulk-step-parse" data-step="parse" hidden>
+          <div class="bulk-progress-icon" aria-hidden="true">⏳</div>
+          <p class="bulk-progress-title" id="bulk-progress-title">Parsing…</p>
+          <p class="muted bulk-progress-sub" id="bulk-progress-sub"></p>
+          <div class="bulk-progress-bar"><div id="bulk-progress-fill" class="bulk-progress-fill"></div></div>
+          <button type="button" id="bulk-cancel-btn" class="btn btn-ghost">Cancel</button>
+        </div>
+
+        <!-- Step 3: review -->
+        <div class="bulk-step bulk-step-review" data-step="review" hidden>
+          <div class="bulk-review-summary">
+            <span id="bulk-review-counter" class="bulk-review-counter">0 selected</span>
+            <button type="button" id="bulk-select-all-btn" class="btn-link">Select all</button>
+            <button type="button" id="bulk-select-none-btn" class="btn-link">None</button>
+          </div>
+          <div id="bulk-review-list" class="bulk-review-list"></div>
+          <details id="bulk-notgear-wrap" class="bulk-notgear-wrap" hidden>
+            <summary class="muted"><span id="bulk-notgear-count">0</span> items not likely gear — expand</summary>
+            <div id="bulk-notgear-list" class="bulk-review-list bulk-notgear-list"></div>
+          </details>
+        </div>
+
+      </div>
+      <footer class="modal-footer bulk-import-footer">
+        <button type="button" id="bulk-back-btn" class="btn btn-ghost hidden">← Back</button>
+        <div class="spacer"></div>
+        <button type="button" class="btn btn-ghost" data-close="bulk-import-modal">Close</button>
+        <button type="button" id="bulk-commit-btn" class="btn btn-primary hidden">Import 0 items</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Settings modal (desktop gear-icon opens this; mirrors the mobile-settings panel content) -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="modal-backdrop" data-close="settings-modal"></div>
+    <div class="modal-panel modal-narrow">
+      <header class="modal-header">
+        <h3 id="settings-modal-title">Settings</h3>
+        <button class="icon-btn" data-close="settings-modal" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body settings-modal-body"></div>
     </div>
   </div>
 

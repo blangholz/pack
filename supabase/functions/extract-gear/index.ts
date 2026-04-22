@@ -594,6 +594,96 @@ async function extractCandidatesFromPhoto(
   };
 }
 
+// Bulk import: classify a list of order-line rows as "likely gear" vs not.
+// Runs in a single Claude call per batch (caller should chunk to ≤50). Keeps
+// cost + latency flat regardless of row count, so a 500-row Amazon CSV only
+// burns ~10 Anthropic calls for the classify pass.
+async function classifyRows(
+  rows: Array<{ title: string; category?: string | null; vendor?: string | null }>,
+): Promise<Array<{ index: number; isGear: boolean; confidence: number; reason?: string | null }>> {
+  const clean = rows.map((r, i) => ({
+    index: i,
+    title: typeof r.title === "string" ? r.title.slice(0, 300) : "",
+    category: typeof r.category === "string" ? r.category.slice(0, 80) : null,
+    vendor: typeof r.vendor === "string" ? r.vendor.slice(0, 80) : null,
+  }));
+  const prompt = [
+    `You help classify line-items from shopping history as outdoor / packable gear vs not.`,
+    ``,
+    `"Gear" = things a person would pack for a trip or outdoor activity: clothing, footwear, backpacks, tents, sleeping bags, cookware, stoves, harnesses, ropes, lights, water bottles, electronics useful outdoors (GPS, headlamp), first-aid, hygiene items used on trips, etc.`,
+    `"Not gear" = books, kitchen gadgets not used while traveling, office supplies, toys unrelated to outdoor use, grocery staples, software, home decor, etc.`,
+    `When in doubt, err toward "gear" with lower confidence — the user will review.`,
+    ``,
+    `Rows:`,
+    JSON.stringify(clean),
+    ``,
+    `Return ONLY a JSON object, no markdown or prose:`,
+    `{ "results": [{ "index": number, "isGear": boolean, "confidence": number (0..1), "reason": string|null }] }`,
+    `One result per input row, same indexes.`,
+  ].join("\n");
+  const text = await callClaude([{ role: "user", content: prompt }], 2500);
+  const raw = coerceJson(text);
+  const results = Array.isArray(raw.results) ? raw.results : [];
+  return results.map((r: any) => ({
+    index: typeof r?.index === "number" ? r.index : -1,
+    isGear: r?.isGear === true,
+    confidence: typeof r?.confidence === "number" ? Math.max(0, Math.min(1, r.confidence)) : 0.5,
+    reason: typeof r?.reason === "string" && r.reason.trim() ? r.reason.trim() : null,
+  })).filter((r: any) => r.index >= 0);
+}
+
+// Bulk import: enrich many rows in one Claude call — fills name/brand/weight/
+// image/url per row using general product knowledge. No web_search here to
+// keep latency bounded; if an image/url is missing the client can optionally
+// lazy-fetch it later via the single-item {identity} mode.
+async function batchEnrichRows(
+  rows: Array<{ title: string; brand?: string | null; url?: string | null; vendor?: string | null }>,
+) {
+  const clean = rows.slice(0, 10).map((r, i) => ({
+    index: i,
+    title: typeof r.title === "string" ? r.title.slice(0, 300) : "",
+    brand: typeof r.brand === "string" ? r.brand.slice(0, 80) : null,
+    url: typeof r.url === "string" ? r.url.slice(0, 400) : null,
+    vendor: typeof r.vendor === "string" ? r.vendor.slice(0, 80) : null,
+  }));
+  const prompt = [
+    `You are extracting structured gear records from shopping-history rows.`,
+    ``,
+    `For each row, use the title (and optional brand/vendor hint) to produce a clean record. Use your general product knowledge to fill in weight, manufacturer URL, and main product image URL when you are reasonably confident — otherwise leave them null.`,
+    ``,
+    `Rows:`,
+    JSON.stringify(clean),
+    ``,
+    `Return ONLY a JSON object, no markdown or prose:`,
+    `{`,
+    `  "results": [`,
+    `    {`,
+    `      "index": number,`,
+    `      "data": {`,
+    `        "name": string (concise product name, no pack-size suffix),`,
+    `        "brand": string|null,`,
+    `        "weightGrams": number|null (single-unit weight),`,
+    `        "quantity": number|null (pack size if multi-pack, else 1),`,
+    `        "url": string|null (manufacturer page preferred),`,
+    `        "imageUrl": string|null (direct image URL),`,
+    `        "notes": string|null (1 short sentence on key spec)`,
+    `      }`,
+    `    }`,
+    `  ]`,
+    `}`,
+    `One result per input row, same indexes. Never return markdown.`,
+  ].join("\n");
+  const text = await callClaude([{ role: "user", content: prompt }], 4000);
+  const raw = coerceJson(text);
+  const results = Array.isArray(raw.results) ? raw.results : [];
+  return results
+    .map((r: any) => ({
+      index: typeof r?.index === "number" ? r.index : -1,
+      data: normalize(r?.data || {}, null),
+    }))
+    .filter((r: any) => r.index >= 0);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -621,6 +711,16 @@ Deno.serve(async (req) => {
   }
 
   try {
+    if (body?.classify && Array.isArray(body.classify.rows) && body.classify.rows.length) {
+      const rows = body.classify.rows.slice(0, 50);
+      const results = await classifyRows(rows);
+      return json({ results });
+    }
+    if (body?.batchEnrich && Array.isArray(body.batchEnrich.rows) && body.batchEnrich.rows.length) {
+      const rows = body.batchEnrich.rows.slice(0, 10);
+      const results = await batchEnrichRows(rows);
+      return json({ results });
+    }
     if (typeof body?.query === "string" && body.query.trim().length >= 3) {
       const suggestions = await searchProducts(body.query.trim());
       return json({ suggestions });
