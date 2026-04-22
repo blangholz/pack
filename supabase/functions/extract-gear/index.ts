@@ -92,12 +92,21 @@ const EXTRACTION_SCHEMA = `Return ONLY a JSON object — no markdown fences, no 
 
 Once you've identified the product, use your general knowledge about that specific product to fill in fields that may not be directly visible (weight from specs, the manufacturer's product URL, the main product image URL). Only include values you are reasonably confident about — leave anything uncertain as null.`;
 
+// Backoff schedule between successive Claude attempts on 429. Each photo
+// identify fans out to ~3 Claude calls (identify → enrich → web-search
+// verify), so a single user action can easily clip Anthropic's per-minute
+// limit. Longer schedule trades a few extra seconds of wait for a much
+// higher chance the user gets a result instead of an error. Total wall
+// time across all attempts is ~33s, which matches the "wait ~30 seconds"
+// guidance we used to surface to the user — preempting it server-side is
+// strictly better UX.
+const CLAUDE_429_BACKOFF_MS = [3_000, 10_000, 20_000];
+
 async function callClaude(messages: any[], maxTokens = 800, tools?: any[]) {
   const body: Record<string, unknown> = { model: MODEL, max_tokens: maxTokens, messages };
   if (tools && tools.length) body.tools = tools;
-  // Up to 2 attempts with backoff on 429 — busy bursts (multi-photo upload)
-  // can blip past Anthropic's per-minute limit; one retry usually clears it.
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const maxAttempts = CLAUDE_429_BACKOFF_MS.length + 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -107,10 +116,15 @@ async function callClaude(messages: any[], maxTokens = 800, tools?: any[]) {
       },
       body: JSON.stringify(body),
     });
-    if (res.status === 429 && attempt === 0) {
-      const ra = parseInt(res.headers.get("retry-after") || "5", 10);
-      const waitMs = Math.min(Math.max(Number.isFinite(ra) ? ra : 5, 1), 10) * 1000;
-      console.warn(`Claude 429 — retrying after ${waitMs}ms`);
+    if (res.status === 429 && attempt < CLAUDE_429_BACKOFF_MS.length) {
+      const ra = parseInt(res.headers.get("retry-after") || "0", 10);
+      // Honor server's retry-after if it's longer than our schedule, but never
+      // shorter — short retries on a sustained limit just burn the budget.
+      const waitMs = Math.max(
+        Number.isFinite(ra) && ra > 0 ? ra * 1000 : 0,
+        CLAUDE_429_BACKOFF_MS[attempt],
+      );
+      console.warn(`Claude 429 — attempt ${attempt + 1}/${maxAttempts}, retrying after ${waitMs}ms`);
       await new Promise((r) => setTimeout(r, waitMs));
       continue;
     }

@@ -3058,6 +3058,17 @@ img.brand-badge-logo {
 @media (max-width: 820px) {
   .desktop-only { display: none !important; }
 }
+@media (min-width: 821px) {
+  .mobile-only { display: none !important; }
+}
+
+.add-gear-library-btn {
+  display: block;
+  margin: 0 16px 10px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
 
 .admin-toggle {
   display: inline-flex;

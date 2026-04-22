@@ -193,10 +193,10 @@
         <span class="admin-toggle-label">Admin</span>
       </button>
       <div class="header-actions">
-        <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
         <span id="user-email" class="muted" style="margin-right: 4px;"></span>
         <button id="sign-out-btn" class="btn btn-ghost" title="Sign out">Sign out</button>
-        <button id="add-gear-btn" class="btn btn-primary" aria-label="Add gear"><span class="btn-text-full">+ Add gear</span><span class="btn-text-mobile" aria-hidden="true">+</span></button>
+        <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
+        <button id="add-gear-btn" class="btn btn-primary mobile-only" aria-label="Add gear"><span class="btn-text-mobile" aria-hidden="true">+</span></button>
       </div>
     </header>
 
@@ -210,6 +210,7 @@
             <button id="library-edit-toggle" class="btn btn-ghost btn-sm" type="button" aria-pressed="false">Edit</button>
           </div>
         </div>
+        <button id="add-gear-btn-library" class="btn btn-primary add-gear-library-btn desktop-only" type="button">+ Add gear</button>
         <input id="gear-search" class="gear-search" type="search" placeholder="🔍 Search gear…" />
         <button id="brand-filter-toggle" class="brand-filter-toggle hidden" type="button" aria-controls="brand-filter-pills" aria-expanded="false">Filter by brand ▾</button>
         <div id="brand-filter-pills" class="brand-filter-pills hidden" aria-label="Filter by brand"></div>

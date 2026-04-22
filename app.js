@@ -318,8 +318,63 @@ function escapeHost(url) {
   catch { return null; }
 }
 
-function gearImageEl(url, { className = '', alt = '' } = {}) {
-  if (!url) return h('div', { class: ('placeholder-img ' + className).trim() }, '🎒');
+// Pick a category-specific emoji placeholder from the item name. Generic
+// backpack on e.g. a "rain jacket" was confusing — this scans common
+// outdoor-gear keywords and returns a closer match. First match wins, so
+// more-specific rules come first (paraglider before harness, hiking boot
+// before shoe). Falls through to 🎒 for anything unrecognized.
+function emojiForItemName(name) {
+  const s = String(name || '').toLowerCase();
+  if (!s) return '🎒';
+  const rules = [
+    [/\b(paraglider|paragliding|wing|glider|reserve|vario)\b/, '🪂'],
+    [/\b(ski|skis|snowboard|snow ?board|skins|split ?board|poles?)\b/, '🎿'],
+    [/\b(bike|bicycle|saddle|handlebar|pedal|derailleur)\b/, '🚲'],
+    [/\b(kayak|canoe|raft|paddle|oar|pfd|dry ?bag|spray ?skirt)\b/, '🚣'],
+    [/\b(wetsuit|drysuit|fins|snorkel|regulator|bcd|dive)\b/, '🤿'],
+    [/\b(climb(ing)?|harness|carabiner|biner|quickdraw|cams?|belay|ascender|gri ?gri|grigri|ice ?axe|ice ?tool|piton|chalk ?bag|crash ?pad|crampons?)\b/, '🧗'],
+    [/\b(rope|cord|webbing|sling|runner|tagline|haul ?line|slackline|highline)\b/, '🪢'],
+    [/\b(rain|wind|soft ?shell|hard ?shell|shell|parka|anorak|puff(y|er)?|down|insulated|fleece|jacket|coat|vest)\b/, '🧥'],
+    [/\b(shirt|tee|t-shirt|top|hoodie|sweater|pullover|jersey|crew|henley)\b/, '👕'],
+    [/\b(pants?|trousers?|shorts?|leggings?|bibs?|kilts?)\b/, '👖'],
+    [/\b(gloves?|mittens?|liners?)\b/, '🧤'],
+    [/\b(socks?|sock liners?)\b/, '🧦'],
+    [/\b(sunglass(es)?|goggles?|shades?)\b/, '🕶️'],
+    [/\b(beanie|cap|hat|sun ?hat|bucket)\b/, '🧢'],
+    [/\b(boots?|shoes?|sandals?|trail ?runners?|approach ?shoes?|sneakers?|clogs?|slippers?)\b/, '🥾'],
+    [/\b(helmet)\b/, '🪖'],
+    [/\b(sleeping ?bag|quilt|bivy|bivvy|sleeping ?pad|pad|pillow|cot|mattress|air ?mat)\b/, '🛏️'],
+    [/\b(tent|tarp|shelter|hammock|footprint|bothy|fly|canopy|tent ?stake)\b/, '⛺'],
+    [/\b(stove|burner|jet ?boil|cook ?(set|pot|kit)|mess ?kit|spork|spoon|fork|mug|cup|bowl|kettle|utensil)\b/, '🔥'],
+    [/\b(knife|blade|multi ?tool|multitool|leatherman)\b/, '🔪'],
+    [/\b(headlamp|flashlight|lantern|torch|head ?light)\b/, '🔦'],
+    [/\b(watch|altimeter|gps|inreach|garmin|suunto)\b/, '⌚'],
+    [/\b(compass)\b/, '🧭'],
+    [/\b(map|atlas|guide ?book|topo)\b/, '🗺️'],
+    [/\b(camera|gopro|lens|tripod|dslr|mirrorless)\b/, '📷'],
+    [/\b(phone|iphone|pixel|galaxy)\b/, '📱'],
+    [/\b(battery|power ?bank|charger)\b/, '🔋'],
+    [/\b(first ?aid|med ?kit|medical|bandage|moleskin|splint|tourniquet|pills?|meds?|ibuprofen|tylenol)\b/, '🩹'],
+    [/\b(sunscreen|lotion|balm|lip ?balm|deet|insect ?repellent|bug ?spray|soap|shampoo|toothpaste)\b/, '🧴'],
+    [/\b(toothbrush)\b/, '🪥'],
+    [/\b(towel|microfiber)\b/, '🧻'],
+    [/\b(bottle|flask|canteen|hydration|bladder|nalgene|thermos|hydro ?flask)\b/, '🥤'],
+    [/\b(filter|purifier|steripen|chlorine|purif|water ?treatment)\b/, '💧'],
+    [/\b(food|snack|bar|gel|meal|mre|dehydrated|jerky|clif|gu)\b/, '🍫'],
+    [/\b(coffee|tea|aeropress)\b/, '☕'],
+    [/\b(umbrella)\b/, '☂️'],
+    [/\b(book|journal|notebook|pen|pencil|log ?book)\b/, '📓'],
+    [/\b(wallet|cash|card|id|passport)\b/, '💳'],
+    [/\b(keys?)\b/, '🔑'],
+    [/\b(backpack|pack|daypack|rucksack|duffel|duffle|tote|stuff ?sack|bag)\b/, '🎒'],
+  ];
+  for (const [re, e] of rules) if (re.test(s)) return e;
+  return '🎒';
+}
+
+function gearImageEl(url, { className = '', alt = '', name = '' } = {}) {
+  const fallbackEmoji = emojiForItemName(name || alt);
+  if (!url) return h('div', { class: ('placeholder-img ' + className).trim() }, fallbackEmoji);
   const img = h('img', { src: url, alt, class: className, referrerpolicy: 'no-referrer' });
   let retriedProxy = false;
   img.addEventListener('error', () => {
@@ -328,7 +383,7 @@ function gearImageEl(url, { className = '', alt = '' } = {}) {
       img.src = 'https://images.weserv.nl/?url=' + encodeURIComponent(url.replace(/^https?:\/\//, ''));
       return;
     }
-    img.replaceWith(h('div', { class: ('placeholder-img ' + className).trim() }, '🎒'));
+    img.replaceWith(h('div', { class: ('placeholder-img ' + className).trim() }, fallbackEmoji));
   });
   return img;
 }
@@ -864,7 +919,7 @@ function renderBrandFilters() {
     counts.set(key, entry);
   }
 
-  if (counts.size < 2) {
+  if (counts.size < 1) {
     host.classList.add('hidden');
     host.classList.remove('has-active');
     toggle.classList.add('hidden');
@@ -908,7 +963,7 @@ function renderBrandFilters() {
 }
 
 function gearCard(gear) {
-  const imgNode = gearImageEl(gear.image_url);
+  const imgNode = gearImageEl(gear.image_url, { name: gear.name || '' });
   const imgWrap = gear.image_url
     ? h('button', {
         class: 'gear-image-link',
@@ -1235,7 +1290,7 @@ function renderActivityEmptyState(activity, reason) {
 }
 
 function suggestionRow(activity, gear) {
-  const imgNode = gearImageEl(gear.image_url, { className: 'gear-image suggestion-image' });
+  const imgNode = gearImageEl(gear.image_url, { className: 'gear-image suggestion-image', name: gear.name || '' });
   const name = h('div', { class: 'suggestion-name' }, gear.name || 'Untitled');
   const brand = gear.brand ? h('div', { class: 'suggestion-brand muted' }, gear.brand) : null;
   const meta = h('div', { class: 'suggestion-meta' }, name, brand);
@@ -1274,7 +1329,7 @@ function suggestionGenericRow(label) {
 
 function activityItemRow(activity, item, gear, opts = {}) {
   const shared = !!opts.shared;
-  const imgNode = gearImageEl(gear.image_url);
+  const imgNode = gearImageEl(gear.image_url, { name: gear.name || '' });
   const imgEl = gear.image_url
     ? h('button', {
         class: 'activity-item-image-link',
@@ -3004,7 +3059,10 @@ async function handleSaveActivity() {
     toast(error.message, 'error');
     return;
   }
-  activities.push(data);
+  // Dedupe: the realtime INSERT echo may have already pushed this row during
+  // the await above. Without this check the same row lands in `activities`
+  // twice, and any later DELETE by id filters both entries out at once.
+  if (!activities.some((a) => a.id === data.id)) activities.push(data);
   activeActivityId = data.id;
   // A trigger auto-enrolls the creator as owner in activity_members —
   // reflect that optimistically so UI state matches without a reload.
@@ -3126,7 +3184,7 @@ async function handleDuplicateActivity() {
     newAct.active_custom_filter_ids = remappedActiveFilters;
   }
 
-  activities.push(newAct);
+  if (!activities.some((a) => a.id === newAct.id)) activities.push(newAct);
   itemsByActivity[newAct.id] = newItems;
   customFiltersByActivity[newAct.id] = newFilters;
   if (currentUser) {
@@ -4168,7 +4226,7 @@ async function createFirstActivity(name, emojiHint) {
     toast(error.message, 'error');
     return null;
   }
-  activities.push(data);
+  if (!activities.some((a) => a.id === data.id)) activities.push(data);
   activeActivityId = data.id;
   // Mirror the optimistic-member pattern from handleSaveActivity so the UI
   // reflects ownership immediately without a reload.
@@ -4390,7 +4448,7 @@ function renderShareLandingPreview(data) {
       h('li', { class: 'invite-preview-row' },
         item.image_url
           ? h('img', { class: 'invite-preview-img', src: item.image_url, alt: '', loading: 'lazy' })
-          : h('div', { class: 'invite-preview-img invite-preview-img-placeholder', 'aria-hidden': 'true' }, '🎒'),
+          : h('div', { class: 'invite-preview-img invite-preview-img-placeholder', 'aria-hidden': 'true' }, emojiForItemName(item.name)),
         h('div', { class: 'invite-preview-text' },
           h('div', { class: 'invite-preview-name' }, item.name || 'Gear'),
           item.brand ? h('div', { class: 'invite-preview-brand' }, item.brand) : null,
@@ -4619,6 +4677,7 @@ function wire() {
 
   // Header
   $('#add-gear-btn').addEventListener('click', openAddGear);
+  $('#add-gear-btn-library').addEventListener('click', openAddGear);
   $('#gear-empty-add-btn').addEventListener('click', openAddGear);
   // Gear-empty suggestion chips: open Add Gear with the name prefilled.
   const gearSuggestions = $('#gear-empty-suggestions');
@@ -5391,10 +5450,12 @@ async function toggleAdminView() {
   if (adminViewEl) adminViewEl.hidden = !adminMode;
   if (adminMode) {
     document.body.setAttribute('data-view-mode', 'admin');
-    if (!adminLoadedOnce) {
-      await loadAdminAll({ force: true });
-      adminLoadedOnce = true;
-    }
+    // Always refetch on open. Realtime events that arrive while admin is
+    // closed don't update the cache (the event handler bails on
+    // `!adminMode`), so a stale cache would otherwise persist across
+    // toggles and miss inserts that happened in between.
+    await loadAdminAll({ force: true });
+    adminLoadedOnce = true;
     subscribeAdminRealtime();
     bindAdminPresence();
     renderAdminOnline();
