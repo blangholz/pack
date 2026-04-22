@@ -135,6 +135,7 @@ let libraryEditMode = false;
 let editingGearId = null;             // null = adding
 let editingActivityId = null;         // null = adding
 let dragState = null;
+let mobileMode = localStorage.getItem('pack:mobileMode') || 'library'; // 'library' | 'packing'
 
 // ------------------------------------------------------------------
 // DOM helpers
@@ -349,7 +350,24 @@ function render() {
   renderWeatherFilter();
   renderActivity();
   renderUnitToggle();
+  renderMobileContext();
   $('#gear-weight-unit').textContent = displayUnit;
+}
+
+function renderMobileContext() {
+  const nameEl = $('#mobile-activity-context-name');
+  if (!nameEl) return;
+  const a = activeActivity();
+  nameEl.textContent = a ? `${a.emoji ? a.emoji + ' ' : ''}${a.name}` : 'Tap to pick / create';
+}
+
+function setMobileMode(mode) {
+  mobileMode = mode;
+  localStorage.setItem('pack:mobileMode', mode);
+  document.body.dataset.mobileMode = mode;
+  for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-mode]')) {
+    tab.classList.toggle('active', tab.dataset.mobileMode === mode);
+  }
 }
 
 function renderUnitToggle() {
@@ -1619,6 +1637,16 @@ async function handleDeleteActivity() {
 // Wiring
 // ------------------------------------------------------------------
 function wire() {
+  // Mobile mode init + tab bar
+  setMobileMode(mobileMode);
+  for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-mode]')) {
+    tab.addEventListener('click', () => setMobileMode(tab.dataset.mobileMode));
+  }
+  for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-action="add-gear"]')) {
+    tab.addEventListener('click', openAddGear);
+  }
+  $('#mobile-activity-context')?.addEventListener('click', () => setMobileMode('packing'));
+
   // Header
   $('#add-gear-btn').addEventListener('click', openAddGear);
   $('#unit-toggle').addEventListener('click', () => {

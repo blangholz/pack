@@ -80,7 +80,7 @@
         <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
         <span id="user-email" class="muted" style="margin-right: 4px;"></span>
         <button id="sign-out-btn" class="btn btn-ghost" title="Sign out">Sign out</button>
-        <button id="add-gear-btn" class="btn btn-primary">+ Add gear</button>
+        <button id="add-gear-btn" class="btn btn-primary" aria-label="Add gear"><span class="btn-text-full">+ Add gear</span><span class="btn-text-mobile" aria-hidden="true">+</span></button>
       </div>
     </header>
 
@@ -94,6 +94,11 @@
             <button id="library-edit-toggle" class="btn btn-ghost btn-sm" type="button" aria-pressed="false">Edit</button>
           </div>
         </div>
+        <button id="mobile-activity-context" class="mobile-activity-context" type="button" aria-label="Switch active activity">
+          <span class="mac-label">Adding to</span>
+          <span class="mac-name" id="mobile-activity-context-name">No activity yet</span>
+          <span class="mac-chevron" aria-hidden="true">›</span>
+        </button>
         <input id="gear-search" class="gear-search" type="search" placeholder="🔍 Search gear…" />
         <div id="brand-filter-pills" class="brand-filter-pills hidden" aria-label="Filter by brand"></div>
         <div id="gear-list" class="gear-list" aria-live="polite"></div>
@@ -141,6 +146,22 @@
     </main>
 
     <p id="status" class="status muted" role="status" aria-live="polite"></p>
+
+    <!-- Mobile bottom tab bar -->
+    <nav id="mobile-tab-bar" class="mobile-tab-bar" aria-label="Mobile navigation">
+      <button class="mobile-tab mobile-tab-action" data-mobile-action="add-gear" type="button" aria-label="Add gear">
+        <span class="mobile-tab-icon mobile-tab-fab">+</span>
+        <span class="mobile-tab-label">Add</span>
+      </button>
+      <button class="mobile-tab" data-mobile-mode="library" type="button">
+        <span class="mobile-tab-icon">🎒</span>
+        <span class="mobile-tab-label">Library</span>
+      </button>
+      <button class="mobile-tab" data-mobile-mode="packing" type="button">
+        <span class="mobile-tab-icon">✓</span>
+        <span class="mobile-tab-label">Packing</span>
+      </button>
+    </nav>
   </div>
 
   <!-- Drop target for removing an item from an activity -->
