@@ -330,9 +330,15 @@ async function loadAll() {
   ]);
   for (const [name, res] of [
     ['gear', gearRes], ['activities', actRes], ['items', itemRes],
-    ['filters', filterRes], ['members', memberRes], ['invites', inviteRes],
+    ['filters', filterRes],
   ]) {
     if (res.error) { setStatus(`Load ${name}: ${res.error.message}`, 'error'); return; }
+  }
+  // Members + invites are optional (shared-activities feature). If their
+  // tables are missing or unreachable, log and treat as empty rather than
+  // blocking core data (gear, activities, items, filters) from loading.
+  for (const [name, res] of [['members', memberRes], ['invites', inviteRes]]) {
+    if (res.error) console.warn(`Load ${name}: ${res.error.message}`);
   }
   gearList = gearRes.data || [];
   activities = actRes.data || [];
@@ -690,7 +696,7 @@ function renderTabs() {
       class: 'activity-tab' + (a.id === activeActivityId ? ' active' : ''),
       dataset: { activityId: a.id },
       role: 'tab',
-      onclick: () => { activeActivityId = a.id; render(); },
+      onclick: () => { activeActivityId = a.id; render(); syncRealtimeSubscription(); },
       ondblclick: () => openEditActivity(a.id),
       ondragover: handleTabDragOver,
       ondragleave: handleTabDragLeave,
@@ -1262,6 +1268,7 @@ function handleTabDrop(e, activityId) {
     addGearToActivity(activityId, dragState.gearId);
     activeActivityId = activityId;
     render();
+    syncRealtimeSubscription();
   }
 }
 function handleBodyDragOver(e) {
@@ -2261,8 +2268,12 @@ function openNewActivity() {
   $('#activity-modal-title').textContent = 'New activity';
   $('#activity-name').value = '';
   $('#activity-emoji').value = '';
+  $('#activity-invite-emails').value = '';
+  $('#activity-invite-field').classList.remove('hidden');
   $('#activity-delete-btn').classList.add('hidden');
   $('#activity-duplicate-btn').classList.add('hidden');
+  // Share glyph only makes sense on existing lists.
+  $('#activity-modal-share-btn').classList.add('hidden');
   showModal('activity-modal');
   requestAnimationFrame(() => $('#activity-name').focus());
 }
@@ -2274,8 +2285,14 @@ function openEditActivity(id) {
   $('#activity-modal-title').textContent = 'Edit activity';
   $('#activity-name').value = a.name || '';
   $('#activity-emoji').value = a.emoji || '';
-  $('#activity-delete-btn').classList.remove('hidden');
+  $('#activity-invite-emails').value = '';
+  // Hide the emails-on-create field when editing an existing list — use the
+  // share modal for that instead.
+  $('#activity-invite-field').classList.add('hidden');
+  $('#activity-delete-btn').classList.toggle('hidden', !isOwnerOf(id));
   $('#activity-duplicate-btn').classList.remove('hidden');
+  // Show the share glyph for anyone — RLS gates what they can actually do.
+  $('#activity-modal-share-btn').classList.remove('hidden');
   showModal('activity-modal');
 }
 
@@ -2301,8 +2318,24 @@ async function handleSaveActivity() {
   if (error) { toast(error.message, 'error'); return; }
   activities.push(data);
   activeActivityId = data.id;
+  // A trigger auto-enrolls the creator as owner in activity_members —
+  // reflect that optimistically so UI state matches without a reload.
+  if (currentUser) {
+    membersByActivity[data.id] = [{
+      activity_id: data.id,
+      user_id: currentUser.id,
+      role: 'owner',
+      joined_at: new Date().toISOString(),
+    }];
+  }
+  const emails = parseEmailList($('#activity-invite-emails').value);
   hideModal('activity-modal');
   render();
+  syncRealtimeSubscription();
+  if (emails.length) {
+    await fanOutInvitesForNewActivity(data.id, emails);
+    render();
+  }
 }
 
 // Duplicate an activity and everything scoped to it: its custom filters,
@@ -2388,9 +2421,18 @@ async function handleDuplicateActivity() {
   activities.push(newAct);
   itemsByActivity[newAct.id] = newItems;
   customFiltersByActivity[newAct.id] = newFilters;
+  if (currentUser) {
+    membersByActivity[newAct.id] = [{
+      activity_id: newAct.id,
+      user_id: currentUser.id,
+      role: 'owner',
+      joined_at: new Date().toISOString(),
+    }];
+  }
   activeActivityId = newAct.id;
   hideModal('activity-modal');
   render();
+  syncRealtimeSubscription();
   toast(`Duplicated "${source.name}"`);
 }
 
@@ -2404,11 +2446,438 @@ async function handleDeleteActivity() {
   activities = activities.filter((x) => x.id !== editingActivityId);
   delete itemsByActivity[editingActivityId];
   delete customFiltersByActivity[editingActivityId];
+  delete membersByActivity[editingActivityId];
+  delete invitesByActivity[editingActivityId];
   if (activeActivityId === editingActivityId) {
     activeActivityId = activities[0]?.id || null;
   }
   hideModal('activity-modal');
   render();
+  syncRealtimeSubscription();
+}
+
+// ------------------------------------------------------------------
+// Share / collaboration
+// ------------------------------------------------------------------
+
+async function callEdgeFunction(name, body) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { error: 'Not signed in' };
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${session.access_token}`,
+      'apikey': SUPABASE_ANON_KEY,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  let json;
+  try { json = await res.json(); } catch { json = {}; }
+  if (!res.ok) return { error: json?.error || `HTTP ${res.status}`, status: res.status };
+  return { data: json };
+}
+
+function openShareModal(activityId) {
+  const a = activities.find((x) => x.id === activityId);
+  if (!a) return;
+  shareModalActivityId = activityId;
+  $('#share-modal-title').textContent = `Share "${a.emoji ? a.emoji + ' ' : ''}${a.name}"`;
+  const subtitle = $('#share-modal-subtitle');
+  if (isOwnerOf(activityId)) {
+    subtitle.textContent = `Invite friends by email. They'll see this list and can add gear from their own library.`;
+  } else {
+    const coCount = Math.max(0, membersFor(activityId).length - 1);
+    subtitle.textContent = `You're packing this list together with ${coCount} other${coCount === 1 ? '' : 's'}.`;
+  }
+  $('#share-invite-email').value = '';
+  setShareInviteStatus('', '');
+  // Hide invite form for non-owners.
+  $('#share-invite-form').classList.toggle('hidden', !isOwnerOf(activityId));
+  // Show Leave button for members (not owner).
+  $('#share-leave-btn').classList.toggle('hidden', isOwnerOf(activityId));
+  renderShareModal();
+  showModal('share-modal');
+  requestAnimationFrame(() => {
+    if (isOwnerOf(activityId)) $('#share-invite-email').focus();
+  });
+}
+
+function renderShareModal() {
+  if (!shareModalActivityId) return;
+  const activityId = shareModalActivityId;
+  const memberList = $('#share-members-list');
+  const inviteList = $('#share-invites-list');
+  memberList.innerHTML = '';
+  inviteList.innerHTML = '';
+
+  const ms = [...membersFor(activityId)].sort((a, b) => {
+    if (a.role === 'owner' && b.role !== 'owner') return -1;
+    if (b.role === 'owner' && a.role !== 'owner') return 1;
+    return (a.joined_at || '').localeCompare(b.joined_at || '');
+  });
+  for (const m of ms) memberList.appendChild(shareMemberRow(activityId, m));
+
+  const invs = [...invitesFor(activityId)].sort((a, b) =>
+    (a.created_at || '').localeCompare(b.created_at || ''));
+  const invitesSection = $('#share-invites-section');
+  if (isOwnerOf(activityId) && invs.length) {
+    invitesSection.classList.remove('hidden');
+    for (const inv of invs) inviteList.appendChild(shareInviteRow(activityId, inv));
+  } else {
+    invitesSection.classList.add('hidden');
+  }
+}
+
+function shareMemberRow(activityId, member) {
+  const name = displayNameFor(member.user_id)
+    || (member.user_id === currentUser?.id ? 'You' : 'Member');
+  const isSelf = member.user_id === currentUser?.id;
+  const canKick = isOwnerOf(activityId) && !isSelf && member.role !== 'owner';
+  return h('li', { class: 'share-member-row' },
+    ownerChipEl(member.user_id, { size: 'lg' }),
+    h('div', { class: 'share-member-main' },
+      h('div', { class: 'share-member-name' }, isSelf ? `${name} (you)` : name),
+      member.role === 'owner'
+        ? h('div', { class: 'share-member-sub' }, 'List admin')
+        : h('div', { class: 'share-member-sub' }, 'Member'),
+    ),
+    h('span', {
+      class: 'share-role-badge' + (member.role === 'owner' ? ' role-owner' : ''),
+    }, member.role),
+    h('div', { class: 'share-row-actions' },
+      canKick
+        ? h('button', {
+            class: 'btn btn-ghost btn-sm',
+            type: 'button',
+            title: 'Remove member',
+            onclick: () => removeMember(activityId, member.user_id, name),
+          }, 'Remove')
+        : null,
+    ),
+  );
+}
+
+function shareInviteRow(activityId, invite) {
+  return h('li', { class: 'share-invite-row' },
+    h('div', { class: 'share-member-main' },
+      h('div', { class: 'share-member-name' }, invite.email),
+      h('div', { class: 'share-invite-sub' }, 'Invite sent — waiting for them to accept'),
+    ),
+    h('div', { class: 'share-row-actions' },
+      h('button', {
+        class: 'btn btn-ghost btn-sm',
+        type: 'button',
+        onclick: (e) => resendInvite(activityId, invite, e.currentTarget),
+      }, 'Resend'),
+      h('button', {
+        class: 'btn btn-ghost btn-sm',
+        type: 'button',
+        onclick: () => cancelInvite(invite.id),
+      }, 'Cancel'),
+    ),
+  );
+}
+
+function setShareInviteStatus(text, kind = '') {
+  const el = $('#share-invite-status');
+  el.textContent = text;
+  el.classList.remove('success', 'error');
+  if (kind === 'success') el.classList.add('success');
+  else if (kind === 'error') el.classList.add('error');
+}
+
+async function handleShareInviteSubmit(e) {
+  e.preventDefault();
+  const activityId = shareModalActivityId;
+  if (!activityId) return;
+  const email = $('#share-invite-email').value.trim();
+  if (!email) return;
+  const btn = $('#share-invite-submit');
+  btn.disabled = true;
+  setShareInviteStatus('Sending invite…');
+  const result = await sendShareInvite(activityId, email);
+  btn.disabled = false;
+  if (result?.error) {
+    setShareInviteStatus(result.error, 'error');
+    return;
+  }
+  $('#share-invite-email').value = '';
+  if (result?.status === 'added') {
+    setShareInviteStatus(`Added ${email} to this list.`, 'success');
+  } else {
+    setShareInviteStatus(`Invite sent to ${email}.`, 'success');
+  }
+  renderShareModal();
+  render();
+}
+
+async function sendShareInvite(activityId, email) {
+  const { data, error } = await callEdgeFunction('share-activity', {
+    activity_id: activityId,
+    email,
+  });
+  if (error) return { error };
+  // Optimistic local update so the UI reflects new state before realtime catches up.
+  if (data?.status === 'added' && data.member) {
+    const list = membersByActivity[activityId] || (membersByActivity[activityId] = []);
+    if (!list.some((m) => m.user_id === data.member.user_id)) list.push(data.member);
+    // Load their profile so their chip has a name.
+    loadCoMemberProfiles().catch(() => {});
+  } else if (data?.status === 'invited' && data.invite) {
+    const list = invitesByActivity[activityId] || (invitesByActivity[activityId] = []);
+    if (!list.some((i) => i.id === data.invite.id)) list.push(data.invite);
+  }
+  return data;
+}
+
+async function resendInvite(activityId, invite, btn) {
+  if (btn) btn.disabled = true;
+  setShareInviteStatus(`Resending invite to ${invite.email}…`);
+  const { error } = await callEdgeFunction('share-activity', {
+    activity_id: activityId,
+    email: invite.email,
+  });
+  if (btn) btn.disabled = false;
+  if (error) setShareInviteStatus(error, 'error');
+  else setShareInviteStatus(`Invite resent to ${invite.email}.`, 'success');
+}
+
+async function cancelInvite(inviteId) {
+  if (!confirm('Cancel this invite? They won\'t be able to accept it.')) return;
+  const { error } = await supabase.from('activity_invites').delete().eq('id', inviteId);
+  if (error) { toast(error.message, 'error'); return; }
+  for (const aid of Object.keys(invitesByActivity)) {
+    invitesByActivity[aid] = invitesByActivity[aid].filter((i) => i.id !== inviteId);
+  }
+  renderShareModal();
+  render();
+}
+
+async function removeMember(activityId, userId, name) {
+  if (!confirm(`Remove ${name} from this list?`)) return;
+  const { error } = await supabase
+    .from('activity_members')
+    .delete()
+    .eq('activity_id', activityId)
+    .eq('user_id', userId);
+  if (error) { toast(error.message, 'error'); return; }
+  if (membersByActivity[activityId]) {
+    membersByActivity[activityId] = membersByActivity[activityId].filter((m) => m.user_id !== userId);
+  }
+  renderShareModal();
+  render();
+}
+
+async function handleLeaveActivity() {
+  const activityId = shareModalActivityId;
+  if (!activityId || !currentUser) return;
+  const a = activities.find((x) => x.id === activityId);
+  if (!a) return;
+  if (!confirm(`Leave "${a.name}"? You won't see this list anymore (the owner can re-invite you).`)) return;
+  const { error } = await supabase
+    .from('activity_members')
+    .delete()
+    .eq('activity_id', activityId)
+    .eq('user_id', currentUser.id);
+  if (error) { toast(error.message, 'error'); return; }
+  activities = activities.filter((x) => x.id !== activityId);
+  delete itemsByActivity[activityId];
+  delete customFiltersByActivity[activityId];
+  delete membersByActivity[activityId];
+  delete invitesByActivity[activityId];
+  if (activeActivityId === activityId) activeActivityId = activities[0]?.id || null;
+  hideModal('share-modal');
+  shareModalActivityId = null;
+  render();
+  syncRealtimeSubscription();
+  toast(`Left "${a.name}"`);
+}
+
+// ---- New-activity invite fan-out -----------------------------------------
+
+// After a new activity is created, if the creator typed emails in the
+// "Share with" field, fire one share-activity call per address in parallel
+// and surface a summary toast. Errors are reported but don't block the save.
+async function fanOutInvitesForNewActivity(activityId, emails) {
+  if (!activityId || !emails || !emails.length) return;
+  const results = await Promise.allSettled(
+    emails.map((email) => sendShareInvite(activityId, email)),
+  );
+  let added = 0, invited = 0, failed = 0;
+  const errors = [];
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && !r.value?.error) {
+      if (r.value?.status === 'added') added++;
+      else invited++;
+    } else {
+      failed++;
+      const msg = r.status === 'fulfilled' ? r.value?.error : (r.reason?.message || String(r.reason));
+      errors.push(`${emails[i]}: ${msg}`);
+    }
+  });
+  const parts = [];
+  if (added) parts.push(`${added} added`);
+  if (invited) parts.push(`${invited} invited`);
+  if (failed) parts.push(`${failed} failed`);
+  if (parts.length) toast(parts.join(' · '), failed ? 'error' : '');
+  if (errors.length) console.warn('Invite fan-out errors', errors);
+}
+
+function parseEmailList(raw) {
+  return (raw || '')
+    .split(/[,\n;]/)
+    .map((s) => s.trim())
+    .filter((s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s));
+}
+
+// ---- Realtime -------------------------------------------------------------
+
+function syncRealtimeSubscription() {
+  const nextId = activeActivityId;
+  if (realtimeChannelActivityId === nextId) return;
+  if (realtimeChannel) {
+    try { supabase.removeChannel(realtimeChannel); } catch {}
+    realtimeChannel = null;
+  }
+  realtimeChannelActivityId = nextId;
+  if (!nextId) return;
+  const aid = nextId;
+  realtimeChannel = supabase
+    .channel(`activity:${aid}`)
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'activity_items', filter: `activity_id=eq.${aid}` },
+      (payload) => onRealtimeItemChange(aid, payload))
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'activity_members', filter: `activity_id=eq.${aid}` },
+      (payload) => onRealtimeMemberChange(aid, payload))
+    .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'custom_filters', filter: `activity_id=eq.${aid}` },
+      (payload) => onRealtimeCustomFilterChange(aid, payload))
+    .on('postgres_changes',
+      { event: 'UPDATE', schema: 'public', table: 'activities', filter: `id=eq.${aid}` },
+      (payload) => onRealtimeActivityChange(aid, payload))
+    .subscribe();
+}
+
+async function onRealtimeItemChange(aid, payload) {
+  const items = itemsByActivity[aid] || (itemsByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (!items.some((i) => i.id === payload.new.id)) items.push(payload.new);
+    if (payload.new.gear_id && !getGearById(payload.new.gear_id)) {
+      await loadForeignGear();
+      await loadCoMemberProfiles();
+    }
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = items.findIndex((i) => i.id === payload.new.id);
+    if (idx >= 0) items[idx] = payload.new;
+    else items.push(payload.new);
+  } else if (payload.eventType === 'DELETE') {
+    itemsByActivity[aid] = items.filter((i) => i.id !== payload.old.id);
+  }
+  if (aid === activeActivityId) renderActivity();
+}
+
+async function onRealtimeMemberChange(aid, payload) {
+  const list = membersByActivity[aid] || (membersByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (!list.some((m) => m.user_id === payload.new.user_id)) list.push(payload.new);
+    await loadCoMemberProfiles();
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = list.findIndex((m) => m.user_id === payload.new.user_id);
+    if (idx >= 0) list[idx] = payload.new;
+  } else if (payload.eventType === 'DELETE') {
+    membersByActivity[aid] = list.filter((m) => m.user_id !== payload.old.user_id);
+  }
+  if (shareModalActivityId === aid) renderShareModal();
+  render();
+}
+
+function onRealtimeCustomFilterChange(aid, payload) {
+  const list = customFiltersByActivity[aid] || (customFiltersByActivity[aid] = []);
+  if (payload.eventType === 'INSERT') {
+    if (!list.some((f) => f.id === payload.new.id)) list.push(payload.new);
+  } else if (payload.eventType === 'UPDATE') {
+    const idx = list.findIndex((f) => f.id === payload.new.id);
+    if (idx >= 0) list[idx] = payload.new;
+  } else if (payload.eventType === 'DELETE') {
+    customFiltersByActivity[aid] = list.filter((f) => f.id !== payload.old.id);
+  }
+  if (aid === activeActivityId) render();
+}
+
+function onRealtimeActivityChange(aid, payload) {
+  const idx = activities.findIndex((a) => a.id === aid);
+  if (idx >= 0) activities[idx] = payload.new;
+  if (aid === activeActivityId) render();
+  else renderTabs();
+}
+
+// ---- Invite acceptance via URL (?invite=...) ------------------------------
+
+async function applyPendingInvite() {
+  if (!pendingInviteToken || !currentUser) return;
+  const token = pendingInviteToken;
+  pendingInviteToken = null;
+  showInviteBanner('Joining packing list…');
+  const { data, error } = await callEdgeFunction('accept-invite', { token });
+  if (error) {
+    showInviteBanner(error, { kind: 'error', autoHide: 6000 });
+    return;
+  }
+  await loadAll();
+  if (data?.activity_id) {
+    activeActivityId = data.activity_id;
+    render();
+    syncRealtimeSubscription();
+    const a = activities.find((x) => x.id === data.activity_id);
+    showInviteBanner(
+      data.already_accepted
+        ? `You're already on "${a?.name || 'this list'}".`
+        : `Welcome! You're packing "${a?.name || 'this list'}" together.`,
+      { autoHide: 4500 },
+    );
+  }
+}
+
+function applyPendingOpenActivity() {
+  if (!pendingOpenActivityId) return;
+  const id = pendingOpenActivityId;
+  pendingOpenActivityId = null;
+  if (activities.some((a) => a.id === id)) {
+    activeActivityId = id;
+    render();
+    syncRealtimeSubscription();
+  }
+}
+
+let inviteBannerTimeout = null;
+function showInviteBanner(text, { kind = '', autoHide = 0 } = {}) {
+  const el = $('#invite-banner');
+  if (!el) return;
+  el.innerHTML = '';
+  el.classList.remove('hidden', 'error');
+  if (kind === 'error') el.classList.add('error');
+  el.appendChild(h('span', {}, text));
+  el.appendChild(h('button', {
+    class: 'invite-banner-close',
+    'aria-label': 'Dismiss',
+    onclick: () => el.classList.add('hidden'),
+  }, '×'));
+  if (inviteBannerTimeout) { clearTimeout(inviteBannerTimeout); inviteBannerTimeout = null; }
+  if (autoHide > 0) {
+    inviteBannerTimeout = setTimeout(() => el.classList.add('hidden'), autoHide);
+  }
+}
+
+function consumeInviteParamsFromUrl() {
+  const url = new URL(window.location.href);
+  let changed = false;
+  const inv = url.searchParams.get('invite');
+  if (inv) { pendingInviteToken = inv; url.searchParams.delete('invite'); changed = true; }
+  const act = url.searchParams.get('activity');
+  if (act) { pendingOpenActivityId = act; url.searchParams.delete('activity'); changed = true; }
+  if (changed) history.replaceState({}, '', url.toString());
 }
 
 // ------------------------------------------------------------------
@@ -2526,6 +2995,19 @@ function wire() {
   $('#edit-activity-btn').addEventListener('click', () => {
     if (activeActivityId) openEditActivity(activeActivityId);
   });
+  $('#share-activity-btn').addEventListener('click', () => {
+    if (activeActivityId) openShareModal(activeActivityId);
+  });
+  $('#activity-modal-share-btn').addEventListener('click', () => {
+    if (editingActivityId) {
+      hideModal('activity-modal');
+      openShareModal(editingActivityId);
+    }
+  });
+
+  // Share modal
+  $('#share-invite-form').addEventListener('submit', handleShareInviteSubmit);
+  $('#share-leave-btn').addEventListener('click', handleLeaveActivity);
 
   // Gear modal
   $('#fetch-details-btn').addEventListener('click', () => {
@@ -2744,7 +3226,7 @@ async function onSignedIn(session) {
   await syncDisplayName(currentUser);
   await loadAll();
   // Seed default activities on first login
-  if (!activities.length) {
+  if (!activities.length && !pendingInviteToken) {
     const seed = [
       { name: 'Climbing', emoji: '🧗', position: 0 },
       { name: 'Highlining', emoji: '🎪', position: 1 },
@@ -2755,9 +3237,22 @@ async function onSignedIn(session) {
     if (!error && data) {
       activities = data;
       activeActivityId = data[0]?.id || null;
+      if (currentUser) {
+        for (const a of data) {
+          membersByActivity[a.id] = [{
+            activity_id: a.id,
+            user_id: currentUser.id,
+            role: 'owner',
+            joined_at: new Date().toISOString(),
+          }];
+        }
+      }
       render();
     }
   }
+  await applyPendingInvite();
+  applyPendingOpenActivity();
+  syncRealtimeSubscription();
 }
 
 function onSignedOut() {
@@ -2766,7 +3261,17 @@ function onSignedOut() {
   activities = [];
   itemsByActivity = {};
   customFiltersByActivity = {};
+  membersByActivity = {};
+  invitesByActivity = {};
+  profilesById = {};
+  foreignGearById = {};
   activeActivityId = null;
+  shareModalActivityId = null;
+  if (realtimeChannel) { try { supabase.removeChannel(realtimeChannel); } catch {} }
+  realtimeChannel = null;
+  realtimeChannelActivityId = null;
+  const banner = $('#invite-banner');
+  if (banner) banner.classList.add('hidden');
   showAuth();
 }
 
@@ -2781,6 +3286,11 @@ async function consumeTokenHashFromUrl() {
   if (error) { console.warn('[auth] verifyOtp failed', error); return { error }; }
   return { session: data?.session || null };
 }
+
+// Capture ?invite= / ?activity= synchronously at module load so they survive
+// both Supabase's implicit-flow URL cleanup AND any cleanAuthParamsFromUrl
+// calls that happen before the boot IIFE runs.
+consumeInviteParamsFromUrl();
 
 supabase.auth.onAuthStateChange((event, session) => {
   console.log('[auth] event:', event, 'session:', !!session);
@@ -2814,7 +3324,14 @@ wire();
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error) console.warn('[auth] getSession error', error);
     if (session?.user) { cleanAuthParamsFromUrl(); await onSignedIn(session); }
-    else showAuth();
+    else {
+      if (pendingInviteToken) {
+        setAuthStatus(
+          'Sign in to join the packing list you were invited to. Enter your email and we\'ll send you a magic link.',
+        );
+      }
+      showAuth();
+    }
   } catch (err) {
     console.error('[auth] boot error', err);
     showAuth();
