@@ -20,6 +20,7 @@
     </div>
     <div class="auth-stack">
       <h2 class="auth-hero">Gear up.<br>Get out.</h2>
+      <p class="auth-subhero">Track your gear. Build packing lists for every adventure.</p>
       <div class="auth-card">
       <div class="brand" style="justify-content: center;">
         <span class="brand-mark">⛰</span>
@@ -28,8 +29,6 @@
 
       <!-- Default: signup CTA + existing-user login -->
       <div id="auth-chooser">
-        <p class="muted auth-tagline">Track your gear. Build packing lists for every adventure.</p>
-
         <button type="button" id="show-signup-btn" class="btn btn-primary auth-cta">
           Sign up as a new user
         </button>
@@ -155,16 +154,12 @@
 
     <!-- Mobile bottom tab bar -->
     <nav id="mobile-tab-bar" class="mobile-tab-bar" aria-label="Mobile navigation">
-      <button class="mobile-tab mobile-tab-action" data-mobile-action="add-gear" type="button" aria-label="Add gear">
-        <span class="mobile-tab-icon mobile-tab-fab">+</span>
-        <span class="mobile-tab-label">Add</span>
-      </button>
       <button class="mobile-tab" data-mobile-mode="library" type="button">
-        <span class="mobile-tab-icon">🎒</span>
+        <span class="mobile-tab-icon">📚</span>
         <span class="mobile-tab-label">Library</span>
       </button>
       <button class="mobile-tab" data-mobile-mode="packing" type="button">
-        <span class="mobile-tab-icon">✓</span>
+        <span class="mobile-tab-icon">🎒</span>
         <span class="mobile-tab-label">Packing</span>
       </button>
     </nav>
@@ -216,29 +211,8 @@
       </header>
 
       <div class="modal-body">
-        <!-- Section 1: Screenshot drop (primary action) -->
-        <div class="section-label">① Drop a screenshot <span class="muted">(recommended)</span></div>
-        <div id="screenshot-dropzone" class="screenshot-dropzone" tabindex="0">
-          <div class="dropzone-idle">
-            <div class="dropzone-icon">🖼️</div>
-            <div class="dropzone-title">Drop a product screenshot here</div>
-            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
-          </div>
-          <div class="dropzone-preview hidden">
-            <img id="screenshot-preview" alt="Screenshot preview" />
-            <div class="dropzone-preview-row">
-              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
-                <span class="spinner-sm" aria-hidden="true"></span>
-                <span id="screenshot-status">Reading the screenshot…</span>
-              </div>
-              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
-            </div>
-          </div>
-        </div>
-        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
-
-        <!-- Section 2: Search -->
-        <div class="section-label">② Or search for a product</div>
+        <!-- Section 1: Search -->
+        <div class="section-label">① Search for a product</div>
         <div class="field gear-search-field">
           <div class="input-row gear-search-row">
             <input id="gear-search-input" type="search" autocomplete="off" placeholder="e.g. Petzl Sama harness" />
@@ -248,8 +222,8 @@
           <p id="gear-search-status" class="field-hint muted"></p>
         </div>
 
-        <!-- Section 3: URL -->
-        <div class="section-label">③ Or paste a product URL</div>
+        <!-- Section 2: URL -->
+        <div class="section-label">② Or paste a product URL</div>
         <div class="field">
           <div class="input-row">
             <input id="gear-url" type="url" placeholder="https://blackdiamondequipment.com/…" />
@@ -258,8 +232,8 @@
           <p id="fetch-status" class="field-hint muted"></p>
         </div>
 
-        <!-- Section 4: Manual -->
-        <div class="section-label">④ Or edit details manually</div>
+        <!-- Section 3: Manual -->
+        <div class="section-label">③ Or edit details manually</div>
         <div class="form-grid">
           <div class="field">
             <label for="gear-name">Name</label>
@@ -286,6 +260,27 @@
             <textarea id="gear-notes" rows="2" placeholder="Size M, red, bought 2025"></textarea>
           </div>
         </div>
+
+        <!-- Section 4: Screenshot (last — less common on mobile) -->
+        <div class="section-label">④ Or drop a screenshot</div>
+        <div id="screenshot-dropzone" class="screenshot-dropzone screenshot-dropzone-compact" tabindex="0">
+          <div class="dropzone-idle">
+            <div class="dropzone-icon">🖼️</div>
+            <div class="dropzone-title">Drop a product screenshot here</div>
+            <div class="dropzone-sub muted">or paste from clipboard (⌘V) · click to choose a file</div>
+          </div>
+          <div class="dropzone-preview hidden">
+            <img id="screenshot-preview" alt="Screenshot preview" />
+            <div class="dropzone-preview-row">
+              <div id="screenshot-progress" class="dropzone-bg-status hidden" role="status" aria-live="polite">
+                <span class="spinner-sm" aria-hidden="true"></span>
+                <span id="screenshot-status">Reading the screenshot…</span>
+              </div>
+              <button id="screenshot-remove" class="btn btn-ghost" type="button">Remove</button>
+            </div>
+          </div>
+        </div>
+        <input type="file" id="screenshot-file-input" accept="image/*" class="hidden" />
 
         <div class="gear-preview" id="gear-preview">
           <div class="gear-preview-img-wrap">
