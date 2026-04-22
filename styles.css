@@ -2890,6 +2890,44 @@ img.brand-badge-logo {
   color: var(--accent-text);
 }
 
+/* Post-create success view inside the activity modal. Appears once a new
+   list is saved so the user can grab the share link without a second trip
+   through the share modal. */
+.activity-created-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0 14px;
+}
+.activity-created-emoji {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  line-height: 1;
+}
+.activity-created-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.activity-created-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.activity-created-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.activity-created-emails-note {
+  margin: 10px 0 0 0;
+  font-size: 12px;
+}
+
 /* Mobile: stack first/last name inputs, stack copy button below URL */
 @media (max-width: 500px) {
   .invite-name-row { grid-template-columns: 1fr; gap: 8px; }

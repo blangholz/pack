@@ -2689,6 +2689,14 @@ function autoDeriveActivityEmoji() {
   syncActivityEmojiDisplay();
 }
 
+function resetActivityModalToFormView() {
+  $('#activity-form-view').hidden = false;
+  $('#activity-created-view').hidden = true;
+  $('#activity-save-btn').classList.remove('hidden');
+  $('#activity-cancel-btn').classList.remove('hidden');
+  $('#activity-done-btn').classList.add('hidden');
+}
+
 function openNewActivity() {
   editingActivityId = null;
   $('#activity-modal-title').textContent = 'New activity';
@@ -2700,6 +2708,7 @@ function openNewActivity() {
   $('#activity-duplicate-btn').classList.add('hidden');
   // Share glyph only makes sense on existing lists.
   $('#activity-modal-share-btn').classList.add('hidden');
+  resetActivityModalToFormView();
   activityEmojiAutoDerive = true;
   syncActivityEmojiDisplay();
   hideEmojiPicker();
@@ -2722,6 +2731,7 @@ function openEditActivity(id) {
   $('#activity-duplicate-btn').classList.remove('hidden');
   // Show the share glyph for anyone — RLS gates what they can actually do.
   $('#activity-modal-share-btn').classList.remove('hidden');
+  resetActivityModalToFormView();
   // In edit mode we respect whatever emoji was saved — either the user picked
   // it deliberately, or it was auto-derived at create time and they're happy
   // with it. Either way, don't silently rewrite it as they retype the name.
@@ -2819,13 +2829,78 @@ async function handleSaveActivity() {
     }];
   }
   const emails = parseEmailList($('#activity-invite-emails').value);
-  hideModal('activity-modal');
   render();
   syncRealtimeSubscription();
+  // Fire email invites in the background while the user sees the success
+  // view. They don't need to wait for Resend to resolve before getting the
+  // share link in their clipboard.
   if (emails.length) {
-    await fanOutInvitesForNewActivity(data.id, emails);
-    render();
+    fanOutInvitesForNewActivity(data.id, emails).then(() => render());
   }
+  // Swap the modal to its post-create success state so the user can grab
+  // the share link right here instead of needing a second trip through the
+  // share modal.
+  await showActivityCreatedSuccess(data, emails);
+}
+
+async function showActivityCreatedSuccess(activity, invitedEmails) {
+  $('#activity-form-view').hidden = true;
+  $('#activity-created-view').hidden = false;
+  $('#activity-modal-title').textContent = 'List created';
+  $('#activity-save-btn').classList.add('hidden');
+  $('#activity-cancel-btn').classList.add('hidden');
+  $('#activity-done-btn').classList.remove('hidden');
+  $('#activity-delete-btn').classList.add('hidden');
+  $('#activity-duplicate-btn').classList.add('hidden');
+  $('#activity-modal-share-btn').classList.add('hidden');
+
+  const emojiEl = $('#activity-created-emoji');
+  if (emojiEl) emojiEl.textContent = (activity?.emoji || '').trim() || '🎒';
+
+  const titleEl = $('#activity-created-title');
+  if (titleEl && activity?.name) {
+    titleEl.textContent = `${activity.name} is ready!`;
+  } else if (titleEl) {
+    titleEl.textContent = 'List created!';
+  }
+
+  const emailsNote = $('#activity-created-emails-note');
+  if (emailsNote) {
+    if (Array.isArray(invitedEmails) && invitedEmails.length) {
+      const label = invitedEmails.length === 1
+        ? `Invite email sent to ${invitedEmails[0]}.`
+        : `Invite emails sent to ${invitedEmails.length} people.`;
+      emailsNote.textContent = label;
+      emailsNote.hidden = false;
+    } else {
+      emailsNote.hidden = true;
+      emailsNote.textContent = '';
+    }
+  }
+
+  const input = $('#activity-created-share-url');
+  const copyBtn = $('#activity-created-share-copy');
+  if (input) input.value = 'Loading…';
+  if (copyBtn) { copyBtn.disabled = true; copyBtn.textContent = 'Copy'; copyBtn.classList.remove('share-link-copied'); }
+
+  const url = await fetchShareLinkUrl(activity.id);
+  if (input) input.value = url || '';
+  if (copyBtn) copyBtn.disabled = !url;
+  // Auto-select so a long-press "Copy" on mobile or ⌘A/C on desktop is one
+  // fewer interaction for a user who wants it in their clipboard fast.
+  if (url && input) {
+    requestAnimationFrame(() => {
+      try { input.focus({ preventScroll: true }); input.select(); } catch {}
+    });
+  }
+}
+
+function handleActivityCreatedShareCopy() {
+  return copyShareLink($('#activity-created-share-url'), $('#activity-created-share-copy'));
+}
+
+function handleActivityDoneBtn() {
+  hideModal('activity-modal');
 }
 
 // Duplicate an activity and everything scoped to it: its custom filters,
@@ -3904,6 +3979,16 @@ async function handleShareSigninSubmit(e) {
 // Share modal: Copy link row.
 // ------------------------------------------------------------------
 
+async function fetchShareLinkUrl(activityId) {
+  const { data, error } = await supabase
+    .from('activity_share_links')
+    .select('token')
+    .eq('activity_id', activityId)
+    .maybeSingle();
+  if (error || !data?.token) return null;
+  return `${window.location.origin}/?share=${encodeURIComponent(data.token)}`;
+}
+
 async function loadShareLinkForModal(activityId) {
   const section = $('#share-link-section');
   const input = $('#share-link-url');
@@ -3913,13 +3998,8 @@ async function loadShareLinkForModal(activityId) {
   input.value = 'Loading…';
   if (copyBtn) copyBtn.disabled = true;
 
-  const { data, error } = await supabase
-    .from('activity_share_links')
-    .select('token')
-    .eq('activity_id', activityId)
-    .maybeSingle();
-
-  if (error || !data?.token) {
+  const url = await fetchShareLinkUrl(activityId);
+  if (!url) {
     // Hide the section cleanly if we can't read it (e.g. backfill missed, or
     // a race with a just-inserted activity).
     section.classList.add('hidden');
@@ -3927,8 +4007,11 @@ async function loadShareLinkForModal(activityId) {
   }
 
   section.classList.remove('hidden');
-  currentShareLinkToken = data.token;
-  const url = `${window.location.origin}/?share=${encodeURIComponent(data.token)}`;
+  // Token is the part after ?share= in the URL; store it for any downstream
+  // callers that want it without re-parsing.
+  try {
+    currentShareLinkToken = new URL(url).searchParams.get('share');
+  } catch {}
   input.value = url;
   if (copyBtn) {
     copyBtn.disabled = false;
@@ -3937,9 +4020,10 @@ async function loadShareLinkForModal(activityId) {
   }
 }
 
-async function handleShareLinkCopy() {
-  const input = $('#share-link-url');
-  const btn = $('#share-link-copy');
+// Copy a read-only URL input into the clipboard, flipping the adjacent button
+// to "✓ Link copied" for 2s. Works for both the share modal and the
+// post-create success view in the activity modal.
+async function copyShareLink(input, btn) {
   if (!input || !btn || !input.value) return;
   const url = input.value;
   let copied = false;
@@ -3964,6 +4048,10 @@ async function handleShareLinkCopy() {
     btn.textContent = 'Press ⌘C';
     setTimeout(() => { btn.textContent = 'Copy'; }, 2500);
   }
+}
+
+function handleShareLinkCopy() {
+  return copyShareLink($('#share-link-url'), $('#share-link-copy'));
 }
 
 // ------------------------------------------------------------------
@@ -4139,6 +4227,8 @@ function wire() {
   $('#activity-save-btn').addEventListener('click', handleSaveActivity);
   $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
   $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
+  $('#activity-done-btn').addEventListener('click', handleActivityDoneBtn);
+  $('#activity-created-share-copy').addEventListener('click', handleActivityCreatedShareCopy);
   // Enter-to-save in activity name field
   $('#activity-name').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); handleSaveActivity(); }
