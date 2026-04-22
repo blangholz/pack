@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <radialGradient id="grad1" cx="20%" cy="-10%" r="60%" fx="20%" fy="-10%">
+      <stop offset="0%" stop-color="#4c5fd5" stop-opacity="0.18"/>
+      <stop offset="60%" stop-color="#4c5fd5" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="grad2" cx="110%" cy="110%" r="55%" fx="110%" fy="110%">
+      <stop offset="0%" stop-color="#4ade80" stop-opacity="0.16"/>
+      <stop offset="60%" stop-color="#4ade80" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wordmark" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4c5fd5"/>
+      <stop offset="100%" stop-color="#6b7eea"/>
+    </linearGradient>
+    <linearGradient id="mountainGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6b7eea"/>
+      <stop offset="100%" stop-color="#4c5fd5"/>
+    </linearGradient>
+    <linearGradient id="mountainGradBack" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8b9dff"/>
+      <stop offset="100%" stop-color="#6b7eea"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Base + ambient gradients -->
+  <rect width="1200" height="630" fill="#f6f7fa"/>
+  <rect width="1200" height="630" fill="url(#grad1)"/>
+  <rect width="1200" height="630" fill="url(#grad2)"/>
+
+  <!-- Decorative silhouette band (background mountains) -->
+  <g opacity="0.08">
+    <path d="M 0 560 L 120 440 L 220 500 L 340 380 L 460 490 L 580 400 L 720 510 L 860 420 L 1000 500 L 1120 430 L 1200 470 L 1200 630 L 0 630 Z" fill="#4c5fd5"/>
+  </g>
+
+  <!-- Brand mark: stylized mountain + sun -->
+  <g transform="translate(600, 195)">
+    <!-- Sun -->
+    <circle cx="55" cy="-15" r="22" fill="#fbbf24" opacity="0.85"/>
+    <!-- Back mountain -->
+    <path d="M -30 70 L 50 -50 L 130 70 Z" fill="url(#mountainGradBack)"/>
+    <!-- Front mountain -->
+    <path d="M -120 70 L -30 -70 L 60 70 Z" fill="url(#mountainGrad)"/>
+    <!-- Snow caps -->
+    <path d="M -30 -70 L -55 -30 L -45 -25 L -30 -45 L -15 -20 L -5 -30 Z" fill="#ffffff" opacity="0.95"/>
+    <path d="M 50 -50 L 32 -20 L 42 -16 L 50 -30 L 62 -14 L 72 -22 Z" fill="#ffffff" opacity="0.9"/>
+    <!-- Base line -->
+    <rect x="-140" y="68" width="280" height="4" rx="2" fill="#1a1d23" opacity="0.08"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="600" y="365" text-anchor="middle" font-size="84" font-weight="800" fill="url(#wordmark)" letter-spacing="-1.5">PackUpGear</text>
+
+  <!-- Headline -->
+  <text x="600" y="450" text-anchor="middle" font-size="60" font-weight="800" fill="#1a1d23" letter-spacing="-1">Gear up. Get out.</text>
+
+  <!-- Sub-line -->
+  <text x="600" y="510" text-anchor="middle" font-size="28" font-weight="500" fill="#565b66">Track your gear. Build packing lists for every adventure.</text>
+
+  <!-- Accent bar -->
+  <rect x="540" y="548" width="120" height="4" rx="2" fill="#4c5fd5" opacity="0.6"/>
+</svg>

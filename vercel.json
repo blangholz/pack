@@ -1,6 +1,18 @@
 {
   "buildCommand": "node build-env.mjs",
   "outputDirectory": ".",
+  "rewrites": [
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "share" }],
+      "destination": "/api/share-page"
+    }
+  ],
+  "functions": {
+    "api/share-page.js": {
+      "includeFiles": "index.html"
+    }
+  },
   "crons": [
     {
       "path": "/api/cron-digest",

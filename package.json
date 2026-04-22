@@ -1,0 +1,11 @@
+{
+  "name": "packupgear",
+  "private": true,
+  "description": "Local tooling for PackUpGear. Vercel builds via build-env.mjs and does not install these deps.",
+  "scripts": {
+    "og:build": "node scripts/generate-og-image.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}
