@@ -5522,6 +5522,7 @@ function renderAdminUsers() {
       <td class="admin-cell-muted">${fmtRelative(u.last_sign_in_at)}</td>
       <td class="num">${fmtInt(u.gear_count)}</td>
       <td class="num">${fmtInt(u.activities_count)}</td>
+      <td class="num${u.shared_activities_count ? '' : ' admin-cell-muted'}">${fmtInt(u.shared_activities_count)}</td>
       <td class="num">${fmtInt(u.items_added_count)}</td>
       <td class="admin-col-actions">${isSelf ? '' : `<button type="button" class="admin-delete-btn" title="Delete user account and all their data">Delete</button>`}</td>
     `;

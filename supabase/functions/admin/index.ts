@@ -211,11 +211,14 @@ async function viewUsers() {
   // activities/activity_items rows so we can aggregate per-owner counts in JS.
   // Scale note: with <100 users and <10k rows this is instant; revisit if
   // the app outgrows that.
-  const [users, gearRows, activityRows, itemRows, profiles] = await Promise.all([
+  const [users, gearRows, activityRows, itemRows, memberRows, profiles] = await Promise.all([
     listAuthUsers(),
     restAdminJson<{ owner_id: string }[]>("gear?select=owner_id"),
     restAdminJson<{ owner_id: string }[]>("activities?select=owner_id"),
     restAdminJson<{ added_by: string | null }[]>("activity_items?select=added_by"),
+    restAdminJson<{ user_id: string; role: string | null }[]>(
+      "activity_members?select=user_id,role",
+    ),
     restAdminJson<{ id: string; display_name: string | null; email: string | null }[]>(
       "profiles?select=id,display_name,email",
     ),
@@ -229,6 +232,13 @@ async function viewUsers() {
     if (!r.added_by) continue;
     itemsByAdder.set(r.added_by, (itemsByAdder.get(r.added_by) || 0) + 1);
   }
+  // Lists the user participates in but does NOT own — i.e. was invited to.
+  // Role 'owner' is filtered out so the two counts partition cleanly.
+  const sharedByUser = new Map<string, number>();
+  for (const r of memberRows) {
+    if (!r.user_id || r.role === 'owner') continue;
+    sharedByUser.set(r.user_id, (sharedByUser.get(r.user_id) || 0) + 1);
+  }
   const profileById = new Map<string, { display_name: string | null }>();
   for (const p of profiles) profileById.set(p.id, { display_name: p.display_name });
   return {
@@ -240,6 +250,7 @@ async function viewUsers() {
       last_sign_in_at: u.last_sign_in_at || null,
       gear_count: gearByOwner.get(u.id) || 0,
       activities_count: actsByOwner.get(u.id) || 0,
+      shared_activities_count: sharedByUser.get(u.id) || 0,
       items_added_count: itemsByAdder.get(u.id) || 0,
     })),
   };
