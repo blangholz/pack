@@ -3683,6 +3683,7 @@ async function applyPendingShareToken() {
 
   if (preview && activities.find((a) => a.id === preview.activity_id)) {
     activeActivityId = preview.activity_id;
+    setMobileMode('packing');
     render();
     syncRealtimeSubscription();
     markActivitySeen(preview.activity_id);
@@ -3716,6 +3717,10 @@ async function acceptShareLinkAndSwitch(token) {
   await loadAll();
   if (data?.activity_id) {
     activeActivityId = data.activity_id;
+    // Fresh signups on mobile default to the Library tab — that's wrong when
+    // the whole reason they arrived is a share link. Force Packing so the
+    // list they just joined is what they see.
+    setMobileMode('packing');
     render();
     syncRealtimeSubscription();
     markActivitySeen(data.activity_id);

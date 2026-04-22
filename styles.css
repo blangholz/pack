@@ -2616,7 +2616,7 @@ img.brand-badge-logo {
   z-index: 200;
   max-width: calc(100vw - 24px);
   padding: 10px 14px;
-  background: rgba(139, 157, 255, 0.14);
+  background: var(--bg-elev);
   border: 1px solid var(--accent);
   border-radius: var(--radius);
   color: var(--text);
@@ -2627,7 +2627,7 @@ img.brand-badge-logo {
   box-shadow: var(--shadow);
 }
 .invite-banner.error {
-  background: rgba(248, 113, 113, 0.12);
+  background: var(--bg-elev);
   border-color: var(--danger);
 }
 .invite-banner .invite-banner-close {
