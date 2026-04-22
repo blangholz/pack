@@ -1269,6 +1269,31 @@ img.brand-badge-logo {
 /* Hidden on desktop */
 .mobile-tab-bar { display: none; }
 .btn-text-mobile { display: none; }
+.take-photo-section { display: none; }
+
+/* Take a photo (touch devices only, when no image yet) */
+@media (hover: none) and (pointer: coarse) {
+  .take-photo-section:not(.hidden) {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-elev-2);
+  }
+  .take-photo-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 14px;
+  }
+  .take-photo-icon { font-size: 18px; line-height: 1; }
+}
 
 /* ============ Activity picker ============ */
 .activity-picker-panel { max-width: 380px; }

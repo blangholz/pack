@@ -289,6 +289,15 @@
           </div>
           <div id="gear-preview-meta" class="muted"></div>
         </div>
+
+        <!-- Take a photo (mobile / touch only — shown when no image yet) -->
+        <div id="take-photo-section" class="take-photo-section hidden">
+          <button id="take-photo-btn" class="btn btn-secondary take-photo-btn" type="button">
+            <span class="take-photo-icon" aria-hidden="true">📷</span>
+            <span>Take a photo for the thumbnail</span>
+          </button>
+          <input type="file" id="take-photo-input" accept="image/*" capture="environment" class="hidden" />
+        </div>
       </div>
 
       <footer class="modal-footer">

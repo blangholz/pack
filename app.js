@@ -1233,6 +1233,33 @@ function updateGearPreview() {
   const weight = $('#gear-weight').value.trim();
   const parts = [name || '(no name)', brand, weight ? `${weight} ${displayUnit}` : null].filter(Boolean);
   meta.textContent = parts.join(' · ');
+  $('#take-photo-section').classList.toggle('hidden', !!url);
+}
+
+// Read a File from <input type="file" capture> and return a JPEG data URL,
+// resized so the longest side is at most maxSide pixels.
+async function fileToThumbnailDataUrl(file, maxSide = 600, quality = 0.85) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error('Could not decode image'));
+    i.src = dataUrl;
+  });
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', quality);
 }
 
 function openAddGear() {
@@ -1818,6 +1845,21 @@ function wire() {
     if (e.key === 'Escape') {
       $$('.modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
       document.body.classList.remove('modal-open');
+    }
+  });
+
+  // Take-a-photo (mobile) — capture, resize client-side, store as data URL
+  $('#take-photo-btn').addEventListener('click', () => $('#take-photo-input').click());
+  $('#take-photo-input').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const dataUrl = await fileToThumbnailDataUrl(f);
+      $('#gear-image').value = dataUrl;
+      updateGearPreview();
+    } catch (err) {
+      toast(err.message || 'Could not process photo', 'error');
     }
   });
 
