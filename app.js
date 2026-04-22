@@ -3585,9 +3585,13 @@ function buildPrintDocument(ctx) {
     const noteHtml = r.note
       ? `<div class="note">${escapeHtml(r.note)}</div>`
       : '';
+    const thumbHtml = r.imageUrl
+      ? `<img class="thumb" src="${escapeHtml(r.imageUrl)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb thumb-ph',textContent:${JSON.stringify(r.emojiFallback)}}))">`
+      : `<span class="thumb thumb-ph">${escapeHtml(r.emojiFallback)}</span>`;
     return `
       <tr class="${r.packed ? 'packed' : ''}">
         <td class="cb"><span class="checkbox">${r.packed ? '✓' : ''}</span></td>
+        <td class="thumb-cell">${thumbHtml}</td>
         <td class="item">
           <div class="item-name">${escapeHtml(r.name)}</div>
           ${r.brand ? `<div class="item-brand">${escapeHtml(r.brand)}</div>` : ''}
@@ -3601,7 +3605,7 @@ function buildPrintDocument(ctx) {
   }).join('');
 
   const emptyHtml = items.length ? '' : `
-    <tr><td colspan="5" class="empty">This list has no items yet.</td></tr>`;
+    <tr><td colspan="6" class="empty">This list has no items yet.</td></tr>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -3609,86 +3613,106 @@ function buildPrintDocument(ctx) {
 <meta charset="utf-8">
 <title>${escapeHtml(activity.name || 'Packing list')}</title>
 <style>
-  @page { size: letter; margin: 0.6in; }
+  @page { size: letter; margin: 0.5in; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font: 12pt/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font: 9.5pt/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     color: #111;
     background: #fff;
-    padding: 24px;
+    padding: 18px;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  .hdr { border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 14px; }
+  .hdr { border-bottom: 1.5px solid #111; padding-bottom: 7px; margin-bottom: 10px; }
   .hdr h1 {
-    margin: 0 0 4px 0;
-    font-size: 22pt;
+    margin: 0 0 3px 0;
+    font-size: 16pt;
     font-weight: 700;
     letter-spacing: -0.01em;
   }
   .meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 18px;
+    gap: 3px 14px;
     color: #444;
-    font-size: 10.5pt;
+    font-size: 8.5pt;
   }
   .meta span b { color: #111; font-weight: 600; }
-  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 2px; }
   thead th {
     text-align: left;
-    font-size: 9pt;
+    font-size: 7.5pt;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: #555;
     border-bottom: 1px solid #999;
-    padding: 6px 8px;
+    padding: 4px 6px;
   }
   tbody td {
-    border-bottom: 1px solid #e0e0e0;
-    padding: 8px;
-    vertical-align: top;
+    border-bottom: 1px solid #e4e4e4;
+    padding: 5px 6px;
+    vertical-align: middle;
   }
-  .cb { width: 26px; }
+  .cb { width: 20px; }
   .checkbox {
     display: inline-block;
-    width: 16px; height: 16px;
-    border: 1.5px solid #111;
-    border-radius: 3px;
+    width: 12px; height: 12px;
+    border: 1.2px solid #111;
+    border-radius: 2px;
     text-align: center;
-    line-height: 14px;
-    font-size: 12px;
+    line-height: 10px;
+    font-size: 10px;
     font-weight: 700;
   }
   tr.packed .checkbox { background: #111; color: #fff; }
   tr.packed .item-name { text-decoration: line-through; color: #555; }
-  .qty { width: 50px; color: #333; }
-  .w { width: 80px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .thumb-cell { width: 36px; padding: 4px 6px !important; }
+  .thumb {
+    display: inline-block;
+    width: 32px; height: 32px;
+    border-radius: 4px;
+    object-fit: cover;
+    border: 1px solid #e4e4e4;
+    background: #fafafa;
+    vertical-align: middle;
+  }
+  .thumb-ph {
+    text-align: center;
+    line-height: 30px;
+    font-size: 16pt;
+    color: #888;
+  }
+  .qty { width: 36px; color: #333; font-size: 9pt; }
+  .w { width: 58px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 9pt; }
   .w.total { font-weight: 600; }
   thead th.w { text-align: right; }
-  .item-name { font-weight: 600; font-size: 11.5pt; }
-  .item-brand { font-size: 9.5pt; color: #666; margin-top: 1px; }
-  .tags { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .item-name { font-weight: 600; font-size: 9.5pt; }
+  .item-brand { font-size: 8pt; color: #666; margin-top: 1px; }
+  .tags { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
   .tag {
     display: inline-block;
-    font-size: 8.5pt;
-    padding: 1px 6px;
+    font-size: 7pt;
+    padding: 0 5px;
     border: 1px solid #bbb;
     border-radius: 999px;
     color: #444;
+    line-height: 1.5;
   }
-  .note { margin-top: 3px; font-size: 10pt; color: #333; font-style: italic; }
+  .note { margin-top: 2px; font-size: 8pt; color: #333; font-style: italic; }
   tfoot td {
-    padding-top: 10px;
+    padding-top: 7px;
     font-weight: 700;
-    border-top: 2px solid #111;
+    border-top: 1.5px solid #111;
+    font-size: 9.5pt;
   }
   tfoot .total-label { text-align: right; }
   tfoot .total-val { text-align: right; font-variant-numeric: tabular-nums; }
-  .empty { color: #777; font-style: italic; padding: 18px 8px !important; text-align: center; }
+  .empty { color: #777; font-style: italic; padding: 14px 8px !important; text-align: center; }
   .footer-note {
-    margin-top: 18px;
-    font-size: 9pt;
-    color: #777;
+    margin-top: 12px;
+    font-size: 7.5pt;
+    color: #888;
     text-align: right;
   }
   @media print {
@@ -3712,6 +3736,7 @@ function buildPrintDocument(ctx) {
     <thead>
       <tr>
         <th></th>
+        <th></th>
         <th>Item</th>
         <th>Qty</th>
         <th class="w">Each</th>
@@ -3726,7 +3751,7 @@ function buildPrintDocument(ctx) {
     <tfoot>
       <tr>
         <td></td>
-        <td colspan="3" class="total-label">Pack total</td>
+        <td colspan="4" class="total-label">Pack total</td>
         <td class="total-val">${escapeHtml(formatWeight(totalGrams, unit))}</td>
       </tr>
     </tfoot>` : ''}
@@ -3777,6 +3802,7 @@ function buildCsvContent(ctx) {
 
   const header = [
     'Packed',
+    'Thumbnail',
     'Item',
     'Brand',
     'Quantity',
@@ -3785,6 +3811,7 @@ function buildCsvContent(ctx) {
     'Weather',
     'Categories',
     'Note',
+    'Image URL',
     'URL',
   ];
 
@@ -3795,8 +3822,15 @@ function buildCsvContent(ctx) {
     return v.toFixed(decimals);
   };
 
+  // Google Sheets + Excel 365 both evaluate =IMAGE("url") to render the
+  // picture inline. We emit the formula when we have an image URL; the raw
+  // URL also lives in the "Image URL" column next to it so older tools that
+  // don't support IMAGE() still have a usable value.
+  const imageFormula = (url) => (url ? `=IMAGE("${String(url).replaceAll('"', '""')}")` : '');
+
   const dataRows = items.map((r) => [
     r.packed ? 'Y' : 'N',
+    imageFormula(r.imageUrl),
     r.name,
     r.brand,
     String(r.quantity),
@@ -3805,6 +3839,7 @@ function buildCsvContent(ctx) {
     r.weather.join(', '),
     r.categories.join(', '),
     r.note,
+    r.imageUrl,
     r.url,
   ]);
 
