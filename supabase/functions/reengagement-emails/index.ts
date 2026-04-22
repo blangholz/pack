@@ -15,6 +15,8 @@
 //       (activity_members missing for the intent's activity_id).
 //   C — added via "Invite by email", never registered
 //       (activity_invites with no matching auth.users).
+//   D — inviter nudge: host invited someone 3+ days ago, invitee never
+//       accepted. Recipient is the HOST; CTA re-sends the original invite.
 //
 // The candidate RPC returns a uniform shape across strands so the per-row
 // branching here is minimal (subject/headline/CTA URL type).
@@ -114,8 +116,9 @@ function copyForStrand(strand: string, vars: {
   activityName: string;
   activityEmoji: string;
   recipientName: string;
+  inviteeEmail: string;
 }): Copy {
-  const { inviter, activityName, activityEmoji, recipientName } = vars;
+  const { inviter, activityName, activityEmoji, recipientName, inviteeEmail } = vars;
   const emoji = activityEmoji ? `${activityEmoji} ` : "";
   const listLabel = `${emoji}${activityName}`;
   const inviterName = inviter || "A friend";
@@ -141,6 +144,20 @@ function copyForStrand(strand: string, vars: {
       bodyDetail: `Here's a fresh link that'll take you straight there.`,
       cta: "Join the packing list →",
       preheader: `Jump into "${activityName}" — it's one tap from here.`,
+    };
+  }
+  if (strand === "D") {
+    // Host-facing nudge. recipientName is the host's first name; inviteeEmail
+    // is the person they invited who still hasn't joined.
+    const who = inviteeEmail || "someone you invited";
+    return {
+      subject: `${who} hasn't joined "${activityName}" yet`,
+      headline: `Remind them?`,
+      subhead: `about "${listLabel}"`,
+      bodyLead: `${greeting} ${who} hasn't accepted the invite to "${activityName}" yet.`,
+      bodyDetail: `One tap re-sends them the original invite email.`,
+      cta: "Remind them →",
+      preheader: `Re-send the "${activityName}" invite to ${who}.`,
     };
   }
   // Strand C
@@ -296,7 +313,7 @@ async function sendEmail(to: string, subject: string, html: string, text: string
 // ---- Candidate fetch + mark-sent ------------------------------------------
 
 interface Candidate {
-  strand: "A" | "B" | "C";
+  strand: "A" | "B" | "C" | "D";
   recipient_email: string;
   user_id: string | null;
   display_name: string;
@@ -306,6 +323,7 @@ interface Candidate {
   inviter_name: string;
   share_token: string;
   invite_token: string;
+  invitee_email: string;
 }
 
 async function fetchCandidates(): Promise<Candidate[]> {
@@ -339,6 +357,9 @@ async function markSent(c: Candidate): Promise<void> {
 // For each strand, pick the right generate_link type and redirect path. A&B
 // land on /?share=<token> so applyPendingShareToken auto-joins on arrival.
 // C lands on /?invite=<token> matching the share-activity invite flow.
+// D lands on /?activity=<id>&remind_invite=<token> — the host is already
+// registered, so a magiclink signs them in and applyPendingRemindInvite
+// fires share-activity to re-send the original invite.
 function buildActionContext(c: Candidate): {
   linkType: "magiclink" | "signup" | "invite";
   redirectTo: string;
@@ -350,6 +371,13 @@ function buildActionContext(c: Candidate): {
       // the admin API — clicking the link confirms the email on the way in.
       linkType: "magiclink",
       redirectTo: `${base}/?share=${encodeURIComponent(c.share_token)}`,
+    };
+  }
+  if (c.strand === "D") {
+    return {
+      linkType: "magiclink",
+      redirectTo: `${base}/?activity=${encodeURIComponent(c.activity_id)}` +
+        `&remind_invite=${encodeURIComponent(c.invite_token)}`,
     };
   }
   return {
@@ -390,7 +418,7 @@ Deno.serve(async (req) => {
 
   let sent = 0;
   let failed = 0;
-  const counts = { A: 0, B: 0, C: 0 } as Record<string, number>;
+  const counts = { A: 0, B: 0, C: 0, D: 0 } as Record<string, number>;
 
   for (const c of candidates) {
     if (!c.recipient_email) { failed++; continue; }
@@ -400,6 +428,7 @@ Deno.serve(async (req) => {
       activityName: c.activity_name,
       activityEmoji: c.activity_emoji || "",
       recipientName,
+      inviteeEmail: c.invitee_email || "",
     });
 
     if (dryRun) {

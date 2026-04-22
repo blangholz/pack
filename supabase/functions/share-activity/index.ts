@@ -475,10 +475,39 @@ Deno.serve(async (req) => {
   }
 
   const activityId = typeof body?.activity_id === "string" ? body.activity_id.trim() : "";
-  const rawEmail = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-  if (!activityId || !rawEmail) {
-    return json({ error: "activity_id and email are required" }, 400);
+  let rawEmail = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+  const resendToken = typeof body?.resend_invite_token === "string" ? body.resend_invite_token.trim() : "";
+
+  if (!activityId) {
+    return json({ error: "activity_id is required" }, 400);
   }
+  if (!rawEmail && !resendToken) {
+    return json({ error: "email or resend_invite_token is required" }, 400);
+  }
+
+  // Remind-flow: resolve the target email from the invite row. Must belong to
+  // this activity and still be unaccepted.
+  if (!rawEmail && resendToken) {
+    const lookupRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/activity_invites?token=eq.${encodeURIComponent(resendToken)}` +
+        `&activity_id=eq.${encodeURIComponent(activityId)}` +
+        `&select=email,accepted_at&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY,
+          authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+      },
+    );
+    if (!lookupRes.ok) return json({ error: "Couldn't look up that invite." }, 500);
+    const rows = await lookupRes.json();
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return json({ error: "Invite not found for this list." }, 404);
+    if (row.accepted_at) return json({ error: "That invite has already been accepted." }, 409);
+    rawEmail = String(row.email || "").trim().toLowerCase();
+    if (!rawEmail) return json({ error: "Invite row is missing an email." }, 500);
+  }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail)) {
     return json({ error: "That doesn't look like a valid email." }, 400);
   }

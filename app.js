@@ -277,6 +277,7 @@ let shareModalActivityId = null;
 let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
 let pendingShareToken = null;         // consumed from ?share= on boot, applied after sign-in
 let pendingOpenActivityId = null;     // consumed from ?activity= on boot, applied after sign-in
+let pendingRemindInviteToken = null;  // consumed from ?remind_invite= on boot, applied after sign-in
 let shareLandingLoaded = false;       // guard so we only fetch the preview once per page load
 let currentShareLinkToken = null;     // token for the active share modal's copy-link row
 // onSignedIn fires from multiple code paths (boot IIFE, auth state change,
@@ -4522,6 +4523,32 @@ function applyPendingOpenActivity() {
   }
 }
 
+// Inviter-nudge CTA: the re-engagement email sends the host a magic link
+// that lands here with ?activity=<id>&remind_invite=<token>. We re-fire
+// share-activity with the existing invite's token so the original invitee
+// gets a fresh copy of the invite email.
+async function applyPendingRemindInvite() {
+  if (!pendingRemindInviteToken || !currentUser) return;
+  const token = pendingRemindInviteToken;
+  pendingRemindInviteToken = null;
+  const activityId = activeActivityId;
+  if (!activityId) {
+    showInviteBanner("Couldn't find the list for that reminder.", { kind: 'error', autoHide: 6000 });
+    return;
+  }
+  showInviteBanner('Re-sending the invite…');
+  const { data, error } = await callEdgeFunction('share-activity', {
+    activity_id: activityId,
+    resend_invite_token: token,
+  });
+  if (error) {
+    showInviteBanner(error, { kind: 'error', autoHide: 6000 });
+    return;
+  }
+  const who = data?.invite?.email || 'them';
+  showInviteBanner(`Reminder sent to ${who}.`, { autoHide: 4500 });
+}
+
 let inviteBannerTimeout = null;
 function showInviteBanner(text, { kind = '', autoHide = 0 } = {}) {
   const el = $('#invite-banner');
@@ -4839,6 +4866,8 @@ function consumeInviteParamsFromUrl() {
   if (shr) { pendingShareToken = shr; url.searchParams.delete('share'); changed = true; }
   const act = url.searchParams.get('activity');
   if (act) { pendingOpenActivityId = act; url.searchParams.delete('activity'); changed = true; }
+  const rem = url.searchParams.get('remind_invite');
+  if (rem) { pendingRemindInviteToken = rem; url.searchParams.delete('remind_invite'); changed = true; }
   if (changed) history.replaceState({}, '', url.toString());
 }
 
@@ -5578,6 +5607,7 @@ async function onSignedIn(session) {
   await applyPendingShareToken();
   await applyPendingShareIntent();
   applyPendingOpenActivity();
+  await applyPendingRemindInvite();
   syncRealtimeSubscription();
   ensurePresenceChannel();
   initAdminOnSignIn();
