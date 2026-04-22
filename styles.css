@@ -1315,11 +1315,12 @@ img.brand-badge-logo {
   .identify-photo-icon { font-size: 20px; line-height: 1; }
   .identify-photo-status {
     margin: 0;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-radius: var(--radius-sm);
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 1.4;
   }
   .identify-photo-status.error {
     border-color: var(--danger, #c2410c);
@@ -1526,6 +1527,14 @@ img.brand-badge-logo {
   .activity-tab-emoji { font-size: 18px; }
   .activity-tab-add { padding: 12px 16px; }
   .custom-filter, .weather-filter { padding: 8px 12px; }
+  /* On phones the hint wraps onto its own row, wasting vertical space.
+     Pin it to the top-right next to the label, and push toggles to row 2. */
+  .weather-filter .weather-filter-label { order: 1; }
+  .weather-filter .weather-filter-hint { order: 2; margin-left: auto; }
+  .weather-filter .weather-toggles { order: 3; width: 100%; }
+  .custom-filter .custom-filter-label { order: 1; }
+  .custom-filter .custom-filter-hint { order: 2; margin-left: auto; }
+  .custom-filter .custom-chips { order: 3; width: 100%; }
   .activity-footer { padding: 10px 12px; flex-wrap: wrap; gap: 8px; }
 }
 
