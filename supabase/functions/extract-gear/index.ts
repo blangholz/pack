@@ -104,7 +104,14 @@ async function callClaude(messages: any[], maxTokens = 800, tools?: any[]) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Claude ${res.status}: ${text.slice(0, 300)}`);
+    console.error(`Claude ${res.status}: ${text.slice(0, 500)}`);
+    if (res.status === 429) {
+      throw new Error("Too many searches right now — try a more specific query in a minute.");
+    }
+    if (res.status >= 500) {
+      throw new Error("Search is temporarily unavailable. Please try again.");
+    }
+    throw new Error("Couldn't complete that search. Try being more specific.");
   }
   const payload = await res.json();
   const parts = Array.isArray(payload?.content) ? payload.content : [];
