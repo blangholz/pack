@@ -612,6 +612,9 @@ async function loadAll() {
   // Whatever the user lands on at boot, mark it as seen so the badge there
   // clears immediately on next render.
   if (activeActivityId) markActivitySeen(activeActivityId);
+  // Retry thumbnail lookup for any of the user's gear that's still image-less.
+  // Fire-and-forget + delayed so it doesn't compete with the initial paint.
+  setTimeout(() => { sweepMissingThumbnails().catch(() => {}); }, 5000);
 }
 
 // Gear rows referenced by activity_items but not in the user's own library —
@@ -2178,6 +2181,51 @@ async function backgroundEnrichThumbnail(gear) {
   if (idx >= 0) {
     gearList[idx] = data;
     render();
+  }
+}
+
+// Periodically hunt for missing thumbnails on library load. A "real" product
+// image beats an emoji fallback any day, so when the save-time enrichment
+// didn't find one (or the gear was created before enrichment existed), we
+// take another pass on boot. Per-gear cooldown in localStorage prevents us
+// from hammering extract-gear on the same failing item over and over; a
+// per-session cap keeps Claude costs bounded on libraries where many items
+// will never be findable.
+const THUMB_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const THUMB_SWEEP_MAX_PER_SESSION = 10;
+const THUMB_SWEEP_PACING_MS = 2000;
+const THUMB_ATTEMPT_KEY_PREFIX = 'pack:thumb-attempt:';
+let thumbSweepRunning = false;
+let thumbSweepAttemptsThisSession = 0;
+
+function markThumbAttempt(gearId) {
+  try { localStorage.setItem(THUMB_ATTEMPT_KEY_PREFIX + gearId, String(Date.now())); } catch (_) {}
+}
+function shouldRetryThumb(gearId) {
+  try {
+    const t = Number(localStorage.getItem(THUMB_ATTEMPT_KEY_PREFIX + gearId) || 0);
+    return !t || (Date.now() - t) > THUMB_RETRY_COOLDOWN_MS;
+  } catch (_) { return true; }
+}
+
+async function sweepMissingThumbnails() {
+  if (thumbSweepRunning) return;
+  if (!currentUser) return;
+  if (thumbSweepAttemptsThisSession >= THUMB_SWEEP_MAX_PER_SESSION) return;
+  thumbSweepRunning = true;
+  try {
+    const candidates = gearList
+      .filter((g) => g.owner_id === currentUser.id && !g.image_url && g.name)
+      .filter((g) => shouldRetryThumb(g.id));
+    for (const gear of candidates) {
+      if (thumbSweepAttemptsThisSession >= THUMB_SWEEP_MAX_PER_SESSION) break;
+      markThumbAttempt(gear.id);
+      thumbSweepAttemptsThisSession++;
+      try { await backgroundEnrichThumbnail(gear); } catch (_) {}
+      await new Promise((r) => setTimeout(r, THUMB_SWEEP_PACING_MS));
+    }
+  } finally {
+    thumbSweepRunning = false;
   }
 }
 
