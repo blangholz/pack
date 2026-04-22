@@ -275,6 +275,18 @@
           </div>
         </footer>
       </section>
+
+      <!-- Mobile-only Settings panel (shown when mobile tab = settings) -->
+      <section class="mobile-settings-panel" aria-label="Settings">
+        <div class="mobile-settings-body">
+          <h2 class="mobile-settings-title">Settings</h2>
+          <div class="mobile-settings-row">
+            <span class="mobile-settings-label muted">Signed in as</span>
+            <span id="mobile-settings-email" class="mobile-settings-value"></span>
+          </div>
+          <button id="mobile-sign-out-btn" class="btn btn-secondary mobile-settings-signout" type="button">Sign out</button>
+        </div>
+      </section>
     </main>
 
     <p id="status" class="status muted" role="status" aria-live="polite"></p>
@@ -288,6 +300,10 @@
       <button class="mobile-tab" data-mobile-mode="packing" type="button">
         <span class="mobile-tab-icon">🎒</span>
         <span class="mobile-tab-label">Packing</span>
+      </button>
+      <button class="mobile-tab" data-mobile-mode="settings" type="button">
+        <span class="mobile-tab-icon">⚙️</span>
+        <span class="mobile-tab-label">Settings</span>
       </button>
     </nav>
   </div>

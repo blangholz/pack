@@ -4212,6 +4212,8 @@ function wire() {
     render();
   });
   $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
+  const mobileSignOutBtn = $('#mobile-sign-out-btn');
+  if (mobileSignOutBtn) mobileSignOutBtn.addEventListener('click', () => supabase.auth.signOut());
 
   // Auth: toggle between chooser and signup form
   $('#show-signup-btn').addEventListener('click', () => {
@@ -4582,6 +4584,8 @@ async function onSignedIn(session) {
   signedInForUserId = session.user.id;
   currentUser = session.user;
   $('#user-email').textContent = currentUser.email || '';
+  const mobileEmailEl = $('#mobile-settings-email');
+  if (mobileEmailEl) mobileEmailEl.textContent = currentUser.email || '';
   showMain();
   await syncDisplayName(currentUser);
   await loadAll();

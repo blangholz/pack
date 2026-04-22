@@ -1584,6 +1584,7 @@ img.brand-badge-logo {
 
 /* Hidden on desktop */
 .mobile-tab-bar { display: none; }
+.mobile-settings-panel { display: none; }
 .btn-text-mobile { display: none; }
 .take-photo-section { display: none; }
 .identify-photo-section { display: none; }
@@ -2169,9 +2170,44 @@ img.brand-badge-logo {
     grid-template-rows: 1fr;
     height: calc(100dvh - 53px - 56px - env(safe-area-inset-bottom, 0px));
   }
-  body[data-mobile-mode="library"] .activity-panel { display: none; }
-  body[data-mobile-mode="packing"] .gear-library { display: none; }
+  body[data-mobile-mode="library"] .activity-panel,
+  body[data-mobile-mode="library"] .mobile-settings-panel { display: none; }
+  body[data-mobile-mode="packing"] .gear-library,
+  body[data-mobile-mode="packing"] .mobile-settings-panel { display: none; }
+  body[data-mobile-mode="settings"] .gear-library,
+  body[data-mobile-mode="settings"] .activity-panel { display: none; }
+  body[data-mobile-mode="settings"] .mobile-settings-panel { display: block; }
   .gear-library { border-right: none; }
+
+  /* Mobile Settings panel */
+  .mobile-settings-panel { overflow-y: auto; }
+  .mobile-settings-body {
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .mobile-settings-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .mobile-settings-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elev);
+  }
+  .mobile-settings-label { font-size: 12px; letter-spacing: 0.02em; }
+  .mobile-settings-value {
+    font-size: 15px;
+    font-weight: 500;
+    word-break: break-all;
+  }
+  .mobile-settings-signout { min-height: 48px; font-size: 15px; }
 
   /* Bottom tab bar */
   .mobile-tab-bar {
