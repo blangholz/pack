@@ -3837,6 +3837,34 @@ async function applyPendingShareToken() {
   await acceptShareLinkAndSwitch(token);
 }
 
+// Cross-device auto-join fallback for share-link flows. When a new user
+// submits their email on the share-landing page, record-share-intent writes
+// an intent row keyed by email. If the magic-link click lands on a different
+// browser/device, the localStorage `pack.autoAcceptShare` flag is missing —
+// but this server-side row survives. onSignedIn reads it here after loadAll
+// and, for genuinely brand-new users (no other lists yet), accepts the share
+// silently with no confirm modal. Veterans still go through the normal
+// applyPendingShareToken path so they can see who's inviting them.
+async function applyPendingShareIntent() {
+  if (!currentUser) return;
+  if (activities.length > 0) return;
+  let intent = null;
+  try {
+    const { data, error } = await supabase.rpc('lookup_my_share_intent');
+    if (error) { console.warn('[share-intent] lookup failed', error); return; }
+    if (Array.isArray(data) && data.length > 0) intent = data[0];
+  } catch (err) {
+    console.warn('[share-intent] lookup threw', err);
+    return;
+  }
+  if (!intent?.token) return;
+  await acceptShareLinkAndSwitch(intent.token);
+  // One-shot: clear the intent so future sign-ins don't keep re-applying it.
+  // Fire-and-forget — a stale row is harmless, and we don't want a transient
+  // RPC error to block the rest of onSignedIn.
+  try { await supabase.rpc('clear_my_share_intent'); } catch {}
+}
+
 async function acceptShareLinkAndSwitch(token) {
   showInviteBanner('Joining packing list…');
   const { data, error } = await callEdgeFunction('accept-share-link', { token });
@@ -4431,6 +4459,13 @@ async function handleShareSignupSubmit(e) {
       token: pendingShareToken, email, name: fullName,
     }));
   } catch {}
+  // Server-side intent row — the cross-device twin of the localStorage flag
+  // above. If the magic-link click lands on a different browser or device,
+  // onSignedIn reads this via lookup_my_share_intent() and auto-joins the
+  // brand-new user. Fire-and-forget: the OTP send is the critical path and
+  // shouldn't block on this.
+  callPublicEdgeFunction('record-share-intent', { email, token: pendingShareToken })
+    .catch((err) => console.warn('[share-intent] record failed', err));
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
@@ -4459,6 +4494,11 @@ async function handleShareSigninSubmit(e) {
   btn.disabled = true;
   setShareLandingStatus('Sending sign-in link…');
   const redirectTo = `${window.location.origin}/?share=${encodeURIComponent(pendingShareToken)}`;
+  // Same cross-device intent row as the signup path — an existing user could
+  // also click the magic link on a different device. onSignedIn reads this
+  // and, if they're not already a member of the target list, auto-joins.
+  callPublicEdgeFunction('record-share-intent', { email, token: pendingShareToken })
+    .catch((err) => console.warn('[share-intent] record failed', err));
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: redirectTo, shouldCreateUser: false },
@@ -5016,6 +5056,7 @@ async function onSignedIn(session) {
   await loadAll();
   await applyPendingInvite();
   await applyPendingShareToken();
+  await applyPendingShareIntent();
   applyPendingOpenActivity();
   syncRealtimeSubscription();
   ensurePresenceChannel();
