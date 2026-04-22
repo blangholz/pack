@@ -1148,3 +1148,77 @@ img.brand-badge-logo {
 .activity-body::-webkit-scrollbar-thumb:hover,
 .modal-body::-webkit-scrollbar-thumb:hover,
 .activity-tabs::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ============ Touch / mobile ============ */
+.gear-card-add-touch {
+  display: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.gear-card-add-touch:active { transform: scale(0.92); }
+.gear-list.edit-mode .gear-card-add-touch { display: none !important; }
+
+/* Show the per-card + button on touch devices (no hover) */
+@media (hover: none) and (pointer: coarse) {
+  .gear-card-add-touch { display: inline-flex; }
+  .gear-card { cursor: pointer; }
+  /* Drag is unreliable on touch; rely on the + button */
+  .gear-card:active { cursor: pointer; }
+}
+
+@media (max-width: 600px) {
+  .app-header { padding: 10px 12px; gap: 8px; flex-wrap: wrap; }
+  .header-actions { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  #user-email { display: none; }
+  .brand h1 { font-size: 16px; }
+  .btn { padding: 6px 10px; font-size: 12px; }
+  .app-main { height: calc(100vh - 53px); }
+
+  .library-header { padding: 10px 12px 6px; }
+  .gear-search { margin: 0 12px 8px; }
+  .gear-list { padding: 4px 12px 12px; }
+
+  .activity-tabs { padding: 8px 12px 0; }
+  .custom-filter, .weather-filter { padding: 8px 12px; }
+
+  .modal { padding: 0; align-items: stretch; }
+  .modal-panel {
+    max-width: none;
+    max-height: 100vh;
+    height: 100vh;
+    border-radius: 0;
+    border: none;
+  }
+  .modal-narrow { max-width: none; }
+  .modal-header { padding: 12px 14px; }
+  .modal-body { padding: 12px 14px; }
+  .modal-footer { padding: 10px 14px; flex-wrap: wrap; }
+  /* Prevent iOS zoom-on-focus by keeping inputs at 16px */
+  .field input[type="text"],
+  .field input[type="url"],
+  .field input[type="number"],
+  .field input[type="password"],
+  .field input[type="search"],
+  .field input[type="email"],
+  .field textarea,
+  .field select,
+  .gear-search,
+  .auth-form input { font-size: 16px; }
+}
+
+@media (max-width: 820px) {
+  /* Give the activity panel more breathing room on small screens */
+  .app-main { grid-template-rows: minmax(180px, 35vh) 1fr; }
+}

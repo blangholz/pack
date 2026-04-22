@@ -452,7 +452,18 @@ function gearCard(gear) {
   const qtyBadge = ownedQty > 1
     ? h('div', { class: 'gear-qty-badge', title: `You own ${ownedQty}` }, `×${ownedQty}`)
     : null;
-  const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight);
+  const addBtn = h('button', {
+    class: 'gear-card-add-touch',
+    type: 'button',
+    title: 'Add to current activity',
+    'aria-label': 'Add to current activity',
+    onclick: (e) => {
+      e.stopPropagation();
+      if (!activeActivityId) { toast('Pick an activity first', 'error'); return; }
+      addGearToActivity(activeActivityId, gear.id);
+    },
+  }, '+');
+  const right = h('div', { class: 'gear-right' }, badge, qtyBadge, weight, addBtn);
 
   const meta = h('div', { class: 'gear-meta' },
     h('div', { class: 'gear-name' }, gear.name || 'Unnamed'),
