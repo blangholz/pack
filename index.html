@@ -725,6 +725,25 @@
         </div>
 
         <div class="share-section">
+          <div class="share-section-label">Or invite by email</div>
+          <form id="share-invite-form" class="share-invite-form" autocomplete="off">
+            <input id="share-invite-email" type="email" inputmode="email" autocomplete="email" placeholder="friend@example.com" required />
+            <button id="share-invite-submit" class="btn btn-primary" type="submit">Send invite</button>
+          </form>
+          <p id="share-invite-status" class="field-hint muted share-invite-status" role="status" aria-live="polite"></p>
+        </div>
+
+        <div class="share-section">
+          <div class="share-section-label">Members</div>
+          <ul id="share-members-list" class="share-members-list" aria-live="polite"></ul>
+        </div>
+
+        <div id="share-invites-section" class="share-section hidden">
+          <div class="share-section-label">Pending invites</div>
+          <ul id="share-invites-list" class="share-invites-list" aria-live="polite"></ul>
+        </div>
+
+        <div class="share-section">
           <div class="share-section-label">Export or print</div>
           <div class="share-export-row">
             <button
@@ -743,25 +762,6 @@
             </button>
           </div>
           <p class="field-hint muted">Paper-friendly printout, or a spreadsheet for Excel, Numbers, or Sheets.</p>
-        </div>
-
-        <div class="share-section">
-          <div class="share-section-label">Or invite by email</div>
-          <form id="share-invite-form" class="share-invite-form" autocomplete="off">
-            <input id="share-invite-email" type="email" inputmode="email" autocomplete="email" placeholder="friend@example.com" required />
-            <button id="share-invite-submit" class="btn btn-primary" type="submit">Send invite</button>
-          </form>
-          <p id="share-invite-status" class="field-hint muted share-invite-status" role="status" aria-live="polite"></p>
-        </div>
-
-        <div class="share-section">
-          <div class="share-section-label">Members</div>
-          <ul id="share-members-list" class="share-members-list" aria-live="polite"></ul>
-        </div>
-
-        <div id="share-invites-section" class="share-section hidden">
-          <div class="share-section-label">Pending invites</div>
-          <ul id="share-invites-list" class="share-invites-list" aria-live="polite"></ul>
         </div>
       </div>
       <footer class="modal-footer">
