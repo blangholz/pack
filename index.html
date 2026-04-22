@@ -54,34 +54,19 @@
       </p>
 
       <div class="auth-card share-landing-auth">
-        <!-- Sign up (default) -->
+        <!-- Unified sign up / sign in. Default is name + email (new users);
+             existing users can collapse the name field via the toggle. -->
         <form id="share-signup-form" class="auth-form">
-          <div class="invite-name-row">
-            <div class="invite-name-field">
-              <label for="share-signup-first">First name</label>
-              <input
-                id="share-signup-first"
-                type="text"
-                autocomplete="given-name"
-                autocapitalize="words"
-                maxlength="40"
-                required
-                placeholder="Ben"
-              />
-            </div>
-            <div class="invite-name-field">
-              <label for="share-signup-last">Last name</label>
-              <input
-                id="share-signup-last"
-                type="text"
-                autocomplete="family-name"
-                autocapitalize="words"
-                maxlength="40"
-                required
-                placeholder="Langholz"
-              />
-            </div>
-          </div>
+          <label for="share-signup-name">Name</label>
+          <input
+            id="share-signup-name"
+            type="text"
+            autocomplete="name"
+            autocapitalize="words"
+            maxlength="80"
+            required
+            placeholder="Ben Langholz"
+          />
           <label for="share-signup-email">Email</label>
           <input
             id="share-signup-email"
@@ -96,7 +81,9 @@
           </button>
         </form>
 
-        <!-- Sign in (toggled) -->
+        <!-- Existing-user sign in: email only. If Supabase says the email
+             has no account, the handler re-shows the signup form with the
+             email prefilled so the user can finish in one step. -->
         <form id="share-signin-form" class="auth-form" hidden>
           <button type="button" id="share-signin-back-btn" class="btn-link auth-back">← Back to sign up</button>
           <label for="share-signin-email">Email</label>
@@ -143,52 +130,33 @@
         <h1>PackUpGear</h1>
       </div>
 
-      <!-- Default: signup CTA + existing-user login -->
-      <div id="auth-chooser">
-        <button type="button" id="show-signup-btn" class="btn btn-primary auth-cta">
-          Sign up as a new user
-        </button>
-
-        <div class="auth-divider"><span>Existing user? Log in</span></div>
-
-        <form id="signin-form" class="auth-form">
+      <!-- Unified sign in / sign up. New users get a progressively-revealed
+           name field when the email has no account yet — no separate signup
+           button or screen. -->
+      <form id="signin-form" class="auth-form">
+        <label for="signin-email">Email</label>
+        <input
+          id="signin-email"
+          type="email"
+          autocomplete="email"
+          inputmode="email"
+          placeholder="you@example.com"
+          required
+        />
+        <div id="signin-name-field" hidden>
+          <label for="signin-name">Your name</label>
           <input
-            id="signin-email"
-            type="email"
-            autocomplete="email"
-            placeholder="you@example.com"
-            required
-          />
-          <button type="submit" id="signin-submit" class="btn btn-secondary">Send magic link</button>
-        </form>
-      </div>
-
-      <!-- Sign up form -->
-      <div id="auth-signup" hidden>
-        <button type="button" id="signup-back-btn" class="btn-link auth-back">← Back</button>
-        <h2 class="auth-subtitle">Create your account</h2>
-        <p class="muted auth-tagline">We'll email you a magic link to finish signing up.</p>
-
-        <form id="signup-form" class="auth-form">
-          <label for="signup-name">Name</label>
-          <input
-            id="signup-name"
+            id="signin-name"
             type="text"
             autocomplete="name"
-            placeholder="Your name"
-            required
+            autocapitalize="words"
+            maxlength="80"
+            placeholder="e.g. Ben Langholz"
           />
-          <label for="signup-email">Email</label>
-          <input
-            id="signup-email"
-            type="email"
-            autocomplete="email"
-            placeholder="you@example.com"
-            required
-          />
-          <button type="submit" id="signup-submit" class="btn btn-primary">Create account</button>
-        </form>
-      </div>
+          <p class="muted signin-name-hint">Looks new — we'll create your account.</p>
+        </div>
+        <button type="submit" id="signin-submit" class="btn btn-primary auth-cta">Send magic link</button>
+      </form>
 
       <p id="auth-status" class="auth-status muted" role="status" aria-live="polite"></p>
       </div>
@@ -198,10 +166,14 @@
   <!-- Main (signed-in) view -->
   <div id="main-view" hidden>
     <header class="app-header">
-      <div class="brand">
+      <a class="brand brand-home" href="/" title="Home" aria-label="Home">
         <span class="brand-mark">⛰</span>
         <h1>PackUpGear</h1>
-      </div>
+      </a>
+      <button id="admin-toggle-btn" class="admin-toggle desktop-only" type="button" aria-pressed="false" hidden title="Toggle admin dashboard">
+        <span class="admin-toggle-icon" aria-hidden="true">⚙</span>
+        <span class="admin-toggle-label">Admin</span>
+      </button>
       <div class="header-actions">
         <button id="unit-toggle" class="btn btn-ghost" title="Toggle weight unit">g</button>
         <span id="user-email" class="muted" style="margin-right: 4px;"></span>
@@ -229,6 +201,24 @@
           <p class="empty-state-title">Your gear library is empty</p>
           <p class="muted">Add something you own — paste a product URL, upload a photo, or fill in details manually.</p>
           <button id="gear-empty-add-btn" class="btn btn-primary" type="button">+ Add your first gear</button>
+          <p class="muted gear-empty-suggestions-label">Or start with a suggestion:</p>
+          <div id="gear-empty-suggestions" class="first-activity-chips gear-empty-chips" role="group" aria-label="Suggested gear">
+            <button type="button" class="first-activity-chip" data-gear-suggestion="Hat">
+              <span class="first-activity-chip-emoji" aria-hidden="true">🧢</span><span>Hat</span>
+            </button>
+            <button type="button" class="first-activity-chip" data-gear-suggestion="Backpack">
+              <span class="first-activity-chip-emoji" aria-hidden="true">🎒</span><span>Backpack</span>
+            </button>
+            <button type="button" class="first-activity-chip" data-gear-suggestion="Trekking poles">
+              <span class="first-activity-chip-emoji" aria-hidden="true">🥢</span><span>Trekking poles</span>
+            </button>
+            <button type="button" class="first-activity-chip" data-gear-suggestion="Headlamp">
+              <span class="first-activity-chip-emoji" aria-hidden="true">🔦</span><span>Headlamp</span>
+            </button>
+            <button type="button" class="first-activity-chip" data-gear-suggestion="Water bottle">
+              <span class="first-activity-chip-emoji" aria-hidden="true">💧</span><span>Water bottle</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -288,6 +278,76 @@
         </div>
       </section>
     </main>
+
+    <!-- Admin dashboard (desktop-only, read-only). Shown when the user is
+         on the admin allowlist AND has flipped the toggle next to the logo. -->
+    <section id="admin-view" class="admin-view" hidden aria-label="Admin dashboard">
+      <div class="admin-topbar">
+        <h2 class="admin-title">Admin dashboard</h2>
+        <span id="admin-live-indicator" class="admin-live" title="Live updates — no refresh needed">
+          <span class="admin-live-dot" aria-hidden="true"></span>
+          <span class="admin-live-label">Live</span>
+        </span>
+        <button id="admin-refresh-btn" class="btn btn-ghost" type="button" title="Re-fetch everything">Refresh</button>
+      </div>
+
+      <div id="admin-stats-grid" class="admin-stats-grid" aria-live="polite">
+        <div class="admin-stat-card" data-stat="users"><div class="admin-stat-label">Users</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+        <div class="admin-stat-card" data-stat="gear"><div class="admin-stat-label">Gear items</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+        <div class="admin-stat-card" data-stat="activities"><div class="admin-stat-label">Lists</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+        <div class="admin-stat-card" data-stat="activity_items"><div class="admin-stat-label">List items</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+        <div class="admin-stat-card" data-stat="activity_members"><div class="admin-stat-label">Memberships</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+        <div class="admin-stat-card admin-stat-active" data-stat="active"><div class="admin-stat-label">Active 7d / 24h</div><div class="admin-stat-value">–</div><div class="admin-stat-sub"></div></div>
+      </div>
+
+      <section class="admin-card admin-daily" aria-label="Daily activity, last 30 days">
+        <div class="admin-card-header">
+          <h3>Last 30 days</h3>
+          <div class="admin-daily-legend">
+            <span class="admin-daily-legend-item"><span class="admin-daily-swatch admin-daily-swatch-signups" aria-hidden="true"></span>Signups</span>
+            <span class="admin-daily-legend-item"><span class="admin-daily-swatch admin-daily-swatch-gear" aria-hidden="true"></span>Gear added</span>
+            <span class="admin-daily-legend-item"><span class="admin-daily-swatch admin-daily-swatch-items" aria-hidden="true"></span>Items added</span>
+          </div>
+        </div>
+        <div id="admin-daily-chart" class="admin-daily-chart"></div>
+      </section>
+
+      <section class="admin-card admin-users-card" aria-label="Users">
+        <div class="admin-card-header">
+          <h3>Users</h3>
+          <input id="admin-users-search" class="admin-search" type="search" placeholder="Search email or name…" aria-label="Search users" />
+        </div>
+        <div class="admin-users-table-wrap">
+          <table class="admin-users-table">
+            <thead>
+              <tr>
+                <th class="admin-sortable" data-sort="email">Email</th>
+                <th class="admin-sortable" data-sort="display_name">Name</th>
+                <th class="admin-sortable" data-sort="created_at">Signed up</th>
+                <th class="admin-sortable" data-sort="last_sign_in_at">Last seen</th>
+                <th class="admin-sortable num" data-sort="gear_count">Gear</th>
+                <th class="admin-sortable num" data-sort="activities_count">Lists</th>
+                <th class="admin-sortable num" data-sort="items_added_count">Items</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-tbody"></tbody>
+          </table>
+          <p id="admin-users-empty" class="muted admin-empty" hidden>No users match.</p>
+        </div>
+      </section>
+
+      <aside id="admin-user-drawer" class="admin-user-drawer" hidden aria-label="User detail">
+        <div class="admin-user-drawer-header">
+          <div>
+            <h3 id="admin-user-drawer-title">User</h3>
+            <p id="admin-user-drawer-subtitle" class="muted"></p>
+          </div>
+          <button id="admin-user-drawer-close" class="btn btn-ghost" type="button" aria-label="Close drawer">✕</button>
+        </div>
+        <div id="admin-user-drawer-body" class="admin-user-drawer-body"></div>
+      </aside>
+      <div id="admin-user-drawer-backdrop" class="admin-user-drawer-backdrop" hidden></div>
+    </section>
 
     <p id="status" class="status muted" role="status" aria-live="polite"></p>
 
@@ -550,8 +610,6 @@
         </div>
       </header>
       <div class="modal-body">
-        <!-- Form view (shown for New Activity + Edit Activity). Hidden after
-             a successful Create, when the success view below takes over. -->
         <div id="activity-form-view">
           <div class="field">
             <label for="activity-name">Name</label>
@@ -565,41 +623,26 @@
             <p class="field-hint muted">We'll pick an emoji to match — click the emoji to change it.</p>
           </div>
           <div id="activity-invite-field" class="field">
-            <label for="activity-invite-emails">Share with (optional)</label>
+            <label for="activity-invite-emails">Invite by email (optional)</label>
             <input id="activity-invite-emails" type="text" inputmode="email" autocomplete="off" placeholder="alex@example.com, sam@example.com" />
             <p class="field-hint muted">Comma-separated emails. We'll invite them to pack this list together.</p>
           </div>
 
-          <div id="activity-emoji-picker" class="emoji-picker-popover hidden" role="dialog" aria-label="Pick an emoji">
-            <!-- Populated at init time from EMOJI_PICKER_CHOICES. -->
-          </div>
-        </div>
-
-        <!-- Post-create success view: shows the share link so the user can
-             drop it into a text thread without a second trip through the
-             share modal. Hidden in Edit mode + during form entry. -->
-        <div id="activity-created-view" hidden>
-          <div class="activity-created-head">
-            <div class="activity-created-emoji" aria-hidden="true">
-              <span id="activity-created-emoji">🎒</span>
-            </div>
-            <div class="activity-created-head-text">
-              <div class="activity-created-title" id="activity-created-title">List created!</div>
-              <div class="activity-created-sub">Grab the link — paste it anywhere to invite friends.</div>
-            </div>
-          </div>
-          <div class="share-section share-link-section">
+          <!-- Inline share-link section. Hidden while entering the form in
+               New-list mode; revealed in place the moment the INSERT lands
+               so the user can grab the link without a follow-up view. -->
+          <div id="activity-share-section" class="share-section share-link-section" hidden>
             <div class="share-section-label">Share with anyone</div>
             <div class="share-link-row">
               <input
-                id="activity-created-share-url"
+                id="activity-share-url"
                 class="share-link-url"
                 type="text"
                 readonly
                 aria-label="Invite link"
               />
               <button
-                id="activity-created-share-copy"
+                id="activity-share-copy"
                 class="btn btn-primary share-link-copy"
                 type="button"
               >
@@ -607,8 +650,12 @@
               </button>
             </div>
             <p class="field-hint muted">Anyone with this link can join the list.</p>
+            <p class="activity-share-emails-note muted" id="activity-share-emails-note" hidden></p>
           </div>
-          <p class="activity-created-emails-note muted" id="activity-created-emails-note" hidden></p>
+
+          <div id="activity-emoji-picker" class="emoji-picker-popover hidden" role="dialog" aria-label="Pick an emoji">
+            <!-- Populated at init time from EMOJI_PICKER_CHOICES. -->
+          </div>
         </div>
       </div>
       <footer class="modal-footer">
@@ -692,7 +739,7 @@
       <h2 id="onboarding-title" class="onboarding-title">Welcome!</h2>
       <p id="onboarding-sub" class="onboarding-sub">Just one quick step before you get to your packing list.</p>
       <form id="onboarding-form" class="onboarding-form" novalidate>
-        <label for="onboarding-name" class="onboarding-label">What should we call you?</label>
+        <label for="onboarding-name" class="onboarding-label">Name</label>
         <input
           id="onboarding-name"
           type="text"
@@ -701,12 +748,23 @@
           autocapitalize="words"
           required
           maxlength="80"
-          placeholder="e.g. Ben"
+          placeholder="e.g. Ben Langholz"
           class="onboarding-input"
         />
         <div id="onboarding-error" class="onboarding-error" role="alert" aria-live="polite"></div>
         <button type="submit" id="onboarding-submit" class="btn btn-primary onboarding-submit">Let's go →</button>
       </form>
+    </div>
+  </div>
+
+  <!-- Onboarding step 2: pick a first activity (only shown when the user has zero lists) -->
+  <div id="onboarding-activity-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboarding-activity-title">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel onboarding-panel" role="document">
+      <div class="onboarding-brand">⛰ <span>PackUpGear</span></div>
+      <h2 id="onboarding-activity-title" class="onboarding-title">What do you want to pack for?</h2>
+      <p class="onboarding-sub">Pick one to start — you can add more any time.</p>
+      <div id="onboarding-activity-picker" class="first-activity-picker"></div>
     </div>
   </div>
 

@@ -422,6 +422,31 @@ function toast(message, kind = '') {
   }, 3200);
 }
 
+// Returns true if the Supabase client has a live session to attach to
+// writes. When the session is gone (expired token + refresh failed), RLS
+// policies like `auth.uid() = owner_id` reject inserts with a confusing
+// "row-level security policy" 42501 error. Call this before user-driven
+// writes so we surface a friendly "sign in again" prompt instead.
+async function requireLiveSession() {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return true;
+  } catch (err) {
+    console.warn('[auth] getSession failed', err);
+  }
+  toast('Your session expired — please sign in again.', 'error');
+  onSignedOut();
+  return false;
+}
+
+// PostgREST returns code 42501 when an RLS policy rejects a write. The most
+// common cause in this app is an unauthenticated client (auth.uid() null →
+// owner_id default null → policy fails). Treat it as "session might be dead"
+// and verify.
+function isRlsError(err) {
+  return err?.code === '42501' || /row-level security/i.test(err?.message || '');
+}
+
 // ------------------------------------------------------------------
 // Auth view / main view toggling
 // ------------------------------------------------------------------
@@ -1071,12 +1096,20 @@ function renderActivity() {
   list.innerHTML = '';
   const activity = activeActivity();
   if (!activity) {
-    empty.classList.add('hidden');
     totalEl.textContent = 'Total: —';
     resetBtn.disabled = true;
     editBtn.disabled = true;
     if (shareBtn) shareBtn.disabled = true;
     if (shareCount) { shareCount.textContent = ''; shareCount.classList.remove('visible'); }
+    // No active list. If the user has zero lists at all, show the inline
+    // first-activity picker so the blank state suggests what to do next
+    // instead of being literally empty.
+    if (!activities.length && currentUser) {
+      renderNoListsBlankState(empty);
+      empty.classList.remove('hidden');
+    } else {
+      empty.classList.add('hidden');
+    }
     return;
   }
   const items = itemsFor(activity.id);
@@ -1138,6 +1171,21 @@ function renderActivity() {
     total += (gear.weight_grams || 0) * qty;
   }
   totalEl.textContent = `Total: ${formatWeight(total)}`;
+}
+
+// Render the "#activity-empty" container as the zero-lists blank state:
+// a heading + inline first-activity picker (chips + custom input + create).
+// Used when the user has no activities at all — either a brand-new signup
+// who skipped the onboarding prompt, or someone who deleted all their lists.
+function renderNoListsBlankState(container) {
+  if (!container) return;
+  container.innerHTML = '';
+  container.appendChild(h('div', { class: 'empty-state-icon', 'aria-hidden': 'true' }, '🎒'));
+  container.appendChild(h('p', { class: 'empty-state-title' }, 'No lists yet.'));
+  container.appendChild(h('p', { class: 'muted' }, 'Pick an activity to start — or type your own.'));
+  const picker = h('div', { class: 'first-activity-picker' });
+  container.appendChild(picker);
+  renderFirstActivityPicker(picker, { showSkip: false });
 }
 
 // Render the "#activity-empty" container based on state:
@@ -1273,7 +1321,10 @@ function activityItemRow(activity, item, gear, opts = {}) {
 
   const ownedQty = Number.isFinite(gear.quantity) && gear.quantity >= 1 ? gear.quantity : 1;
   const itemQty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
-  const showStepper = ownedQty > 1;
+  // Show the stepper whenever there's more than one in the list, regardless
+  // of how many the user "owns". Otherwise drag-incrementing past ownedQty=1
+  // silently bumps the count without any visible UI to adjust it back.
+  const showStepper = ownedQty > 1 || itemQty > 1;
   const totalWeight = (gear.weight_grams || 0) * itemQty;
 
   const stepperEl = showStepper
@@ -1724,13 +1775,26 @@ function hideModal(id) {
 }
 
 // ------------------------------------------------------------------
-// Activity picker (mobile per-card "+" → choose which list)
+// Activity picker (per-card "+" → choose which list)
 // ------------------------------------------------------------------
+// On mobile this is the primary "add to list" affordance, so each tap
+// auto-closes the modal (one decision, one tap, dismiss). On desktop the
+// modal stays open after each action so the user can fluidly add multiple
+// quantities, add to several lists, or undo — and dismisses by clicking out.
+let activePickerGearId = null;
+
 function openActivityPicker(gearId) {
   const gear = gearList.find((g) => g.id === gearId);
   if (!gear) return;
+  activePickerGearId = gearId;
   $('#activity-picker-gear').textContent = gear.name || 'this item';
+  renderActivityPickerList();
+  showModal('activity-picker');
+}
 
+function renderActivityPickerList() {
+  const gearId = activePickerGearId;
+  if (!gearId) return;
   const list = $('#activity-picker-list');
   list.innerHTML = '';
   if (!activities.length) {
@@ -1738,41 +1802,67 @@ function openActivityPicker(gearId) {
       'You don\u2019t have any packing lists yet. Tap below to create one.');
     list.appendChild(empty);
   }
+  const dismissAfterAction = IS_TOUCH;
   for (const a of activities) {
-    const inList = itemsFor(a.id).some((i) => i.gear_id === gearId);
+    const existing = itemsFor(a.id).find((i) => i.gear_id === gearId);
+    const inList = !!existing;
+    const itemQty = existing && Number.isFinite(existing.quantity) && existing.quantity >= 1
+      ? existing.quantity : (existing ? 1 : 0);
     const main = h('button', {
       class: 'activity-picker-main' + (inList ? ' in-list' : ''),
       type: 'button',
       onclick: async () => {
         if (inList) return;
-        hideModal('activity-picker');
+        if (dismissAfterAction) hideModal('activity-picker');
         await addGearToActivity(a.id, gearId);
+        if (!dismissAfterAction) renderActivityPickerList();
       },
       'aria-disabled': inList ? 'true' : 'false',
     },
       h('span', { class: 'activity-picker-emoji' }, a.emoji || '🎒'),
       h('span', { class: 'activity-picker-name' }, a.name),
       inList
-        ? h('span', { class: 'activity-picker-badge' }, '✓ in list')
+        ? h('span', { class: 'activity-picker-badge' },
+            itemQty > 1 ? `✓ ${itemQty} in list` : '✓ in list')
         : h('span', { class: 'activity-picker-add' }, '+'),
     );
     const row = h('div', { class: 'activity-picker-row' + (inList ? ' in-list' : '') }, main);
     if (inList) {
+      const incrementBtn = h('button', {
+        class: 'activity-picker-increment',
+        type: 'button',
+        title: `Add another to ${a.name}`,
+        'aria-label': `Add another to ${a.name}`,
+        onclick: async () => {
+          if (dismissAfterAction) hideModal('activity-picker');
+          await addGearToActivity(a.id, gearId);
+          if (!dismissAfterAction) renderActivityPickerList();
+        },
+      }, '+');
+      // Minus mirrors the activity-view stepper: decrement until qty hits 1,
+      // then a final tap removes the row entirely. Removing 5-of-something in
+      // one click was too easy to do by accident.
+      const willRemove = itemQty <= 1;
       const removeBtn = h('button', {
         class: 'activity-picker-remove',
         type: 'button',
-        title: `Remove from ${a.name}`,
-        'aria-label': `Remove from ${a.name}`,
+        title: willRemove ? `Remove from ${a.name}` : `One fewer in ${a.name}`,
+        'aria-label': willRemove ? `Remove from ${a.name}` : `One fewer in ${a.name}`,
         onclick: async () => {
-          hideModal('activity-picker');
-          await removeGearFromActivity(a.id, gearId);
+          if (dismissAfterAction) hideModal('activity-picker');
+          if (willRemove) {
+            await removeGearFromActivity(a.id, gearId);
+          } else {
+            await setItemQuantity(existing.id, itemQty - 1);
+          }
+          if (!dismissAfterAction) renderActivityPickerList();
         },
       }, '−');
+      row.appendChild(incrementBtn);
       row.appendChild(removeBtn);
     }
     list.appendChild(row);
   }
-  showModal('activity-picker');
 }
 
 // ------------------------------------------------------------------
@@ -1930,16 +2020,25 @@ async function handleSaveGear() {
   enrichmentSeq++; // cancel any in-flight foreground enrichment
   const payload = readGearForm();
   if (!payload.name) { $('#fetch-status').textContent = 'Name is required.'; return; }
+  if (!(await requireLiveSession())) return;
   let saved;
   if (editingGearId) {
     const { data, error } = await supabase.from('gear').update(payload).eq('id', editingGearId).select().single();
-    if (error) { toast(error.message, 'error'); return; }
+    if (error) {
+      if (isRlsError(error) && !(await requireLiveSession())) return;
+      toast(error.message, 'error');
+      return;
+    }
     const idx = gearList.findIndex((g) => g.id === editingGearId);
     if (idx >= 0) gearList[idx] = data;
     saved = data;
   } else {
     const { data, error } = await supabase.from('gear').insert(payload).select().single();
-    if (error) { toast(error.message, 'error'); return; }
+    if (error) {
+      if (isRlsError(error) && !(await requireLiveSession())) return;
+      toast(error.message, 'error');
+      return;
+    }
     gearList.unshift(data);
     saved = data;
   }
@@ -1976,8 +2075,17 @@ function resetGearFormFields() {
   $('#gear-notes').value = '';
   $('#gear-delete-btn').classList.add('hidden');
   $('#fetch-status').textContent = '';
+  gearFormFilledByPhoto = false;
   updateGearPreview();
 }
+
+// True when the gear form's current values came from applyCandidateForce
+// (i.e. an auto-populated photo identification). Reset whenever the form
+// is cleared or the user manually edits a populated field. We use this to
+// decide whether to wipe the form before re-analyzing a different photo —
+// without it, a failed re-identify leaves the previous photo's extracted
+// data sitting visibly under a different photo, which is confusing.
+let gearFormFilledByPhoto = false;
 
 // After a gear is saved without a thumbnail, keep trying in the background.
 // When an image is found, patch the row and re-render the library.
@@ -2446,6 +2554,7 @@ function applyCandidateForce(c, photoDataUrl) {
   $('#gear-quantity').value = String(c.quantity ?? 1);
   // Use Claude's product image if it exists, otherwise fall back to the user's photo.
   $('#gear-image').value = c.imageUrl || photoDataUrl || '';
+  gearFormFilledByPhoto = true;
   updateGearPreview();
 }
 
@@ -2547,6 +2656,23 @@ function showCurrentPhoto() {
 
 async function processPhotoEntry(entry, { forceMultiple = false } = {}) {
   const mySeq = photoSeq;
+  // If the form is currently showing data auto-filled from a prior photo
+  // identify, wipe it before this one runs. Otherwise a failed identify
+  // (rate limit, network blip, etc.) leaves the user looking at the
+  // previous photo's name/brand/weight under the new photo. We only clear
+  // when we're the visible entry and the form is photo-owned, so manual
+  // edits and edit-mode preloads are preserved.
+  if (photoQueue[photoIndex] === entry && gearFormFilledByPhoto) {
+    $('#gear-name').value = '';
+    $('#gear-brand').value = '';
+    $('#gear-weight').value = '';
+    $('#gear-quantity').value = '1';
+    $('#gear-url').value = '';
+    $('#gear-image').value = '';
+    $('#gear-notes').value = '';
+    gearFormFilledByPhoto = false;
+    updateGearPreview();
+  }
   entry.status = 'analyzing';
   entry.error = null;
   if (photoQueue[photoIndex] === entry) showCurrentPhoto();
@@ -2701,7 +2827,21 @@ function autoDeriveActivityEmoji() {
 
 function resetActivityModalToFormView() {
   $('#activity-form-view').hidden = false;
-  $('#activity-created-view').hidden = true;
+  const shareSection = $('#activity-share-section');
+  if (shareSection) shareSection.hidden = true;
+  const emailsNote = $('#activity-share-emails-note');
+  if (emailsNote) { emailsNote.hidden = true; emailsNote.textContent = ''; }
+  const shareUrl = $('#activity-share-url');
+  if (shareUrl) shareUrl.value = '';
+  const shareCopy = $('#activity-share-copy');
+  if (shareCopy) { shareCopy.disabled = true; shareCopy.textContent = 'Copy'; shareCopy.classList.remove('share-link-copied'); }
+  // Undo the post-create form lock so the next open starts editable again.
+  const nameInput = $('#activity-name');
+  if (nameInput) nameInput.readOnly = false;
+  const emailsInput = $('#activity-invite-emails');
+  if (emailsInput) emailsInput.readOnly = false;
+  const emojiBtn = $('#activity-emoji-btn');
+  if (emojiBtn) emojiBtn.disabled = false;
   $('#activity-save-btn').classList.remove('hidden');
   $('#activity-cancel-btn').classList.remove('hidden');
   $('#activity-done-btn').classList.add('hidden');
@@ -2810,9 +2950,14 @@ async function handleSaveActivity() {
   const name = $('#activity-name').value.trim();
   const emoji = $('#activity-emoji').value.trim() || null;
   if (!name) return;
+  if (!(await requireLiveSession())) return;
   if (editingActivityId) {
     const { error } = await supabase.from('activities').update({ name, emoji }).eq('id', editingActivityId);
-    if (error) { toast(error.message, 'error'); return; }
+    if (error) {
+      if (isRlsError(error) && !(await requireLiveSession())) return;
+      toast(error.message, 'error');
+      return;
+    }
     const a = activities.find((x) => x.id === editingActivityId);
     if (a) { a.name = name; a.emoji = emoji; }
     hideModal('activity-modal');
@@ -2825,7 +2970,11 @@ async function handleSaveActivity() {
     .insert({ name, emoji, position })
     .select()
     .single();
-  if (error) { toast(error.message, 'error'); return; }
+  if (error) {
+    if (isRlsError(error) && !(await requireLiveSession())) return;
+    toast(error.message, 'error');
+    return;
+  }
   activities.push(data);
   activeActivityId = data.id;
   // A trigger auto-enrolls the creator as owner in activity_members —
@@ -2847,15 +2996,17 @@ async function handleSaveActivity() {
   if (emails.length) {
     fanOutInvitesForNewActivity(data.id, emails).then(() => render());
   }
-  // Swap the modal to its post-create success state so the user can grab
-  // the share link right here instead of needing a second trip through the
-  // share modal.
-  await showActivityCreatedSuccess(data, emails);
+  // Morph the current view in place — no second screen. The form stays
+  // visible, a share-link row appears below, and the footer swaps to Done.
+  await revealShareSectionAfterCreate(data, emails);
 }
 
-async function showActivityCreatedSuccess(activity, invitedEmails) {
-  $('#activity-form-view').hidden = true;
-  $('#activity-created-view').hidden = false;
+// Morph the new-list modal into its post-create state without a view swap:
+// reveal the inline share-link section, swap the footer to a single Done
+// button, and lock the form fields so the user can't accidentally "re-create"
+// the same list. Name/emoji remain readable; editing after create goes
+// through the tab's edit pencil.
+async function revealShareSectionAfterCreate(activity, invitedEmails) {
   $('#activity-modal-title').textContent = 'List created';
   $('#activity-save-btn').classList.add('hidden');
   $('#activity-cancel-btn').classList.add('hidden');
@@ -2864,23 +3015,24 @@ async function showActivityCreatedSuccess(activity, invitedEmails) {
   $('#activity-duplicate-btn').classList.add('hidden');
   $('#activity-modal-share-btn').classList.add('hidden');
 
-  const emojiEl = $('#activity-created-emoji');
-  if (emojiEl) emojiEl.textContent = (activity?.emoji || '').trim() || '🎒';
+  // Lock the form inputs so the user can't keep typing into a list that's
+  // already been created. Readonly (not disabled) keeps the text selectable.
+  const nameInput = $('#activity-name');
+  if (nameInput) nameInput.readOnly = true;
+  const emailsInput = $('#activity-invite-emails');
+  if (emailsInput) emailsInput.readOnly = true;
+  const emojiBtn = $('#activity-emoji-btn');
+  if (emojiBtn) emojiBtn.disabled = true;
 
-  const titleEl = $('#activity-created-title');
-  if (titleEl && activity?.name) {
-    titleEl.textContent = `${activity.name} is ready!`;
-  } else if (titleEl) {
-    titleEl.textContent = 'List created!';
-  }
+  const shareSection = $('#activity-share-section');
+  if (shareSection) shareSection.hidden = false;
 
-  const emailsNote = $('#activity-created-emails-note');
+  const emailsNote = $('#activity-share-emails-note');
   if (emailsNote) {
     if (Array.isArray(invitedEmails) && invitedEmails.length) {
-      const label = invitedEmails.length === 1
+      emailsNote.textContent = invitedEmails.length === 1
         ? `Invite email sent to ${invitedEmails[0]}.`
         : `Invite emails sent to ${invitedEmails.length} people.`;
-      emailsNote.textContent = label;
       emailsNote.hidden = false;
     } else {
       emailsNote.hidden = true;
@@ -2888,16 +3040,14 @@ async function showActivityCreatedSuccess(activity, invitedEmails) {
     }
   }
 
-  const input = $('#activity-created-share-url');
-  const copyBtn = $('#activity-created-share-copy');
+  const input = $('#activity-share-url');
+  const copyBtn = $('#activity-share-copy');
   if (input) input.value = 'Loading…';
   if (copyBtn) { copyBtn.disabled = true; copyBtn.textContent = 'Copy'; copyBtn.classList.remove('share-link-copied'); }
 
   const url = await fetchShareLinkUrl(activity.id);
   if (input) input.value = url || '';
   if (copyBtn) copyBtn.disabled = !url;
-  // Auto-select so a long-press "Copy" on mobile or ⌘A/C on desktop is one
-  // fewer interaction for a user who wants it in their clipboard fast.
   if (url && input) {
     requestAnimationFrame(() => {
       try { input.focus({ preventScroll: true }); input.select(); } catch {}
@@ -2905,8 +3055,8 @@ async function showActivityCreatedSuccess(activity, invitedEmails) {
   }
 }
 
-function handleActivityCreatedShareCopy() {
-  return copyShareLink($('#activity-created-share-url'), $('#activity-created-share-copy'));
+function handleActivityShareCopy() {
+  return copyShareLink($('#activity-share-url'), $('#activity-share-copy'));
 }
 
 function handleActivityDoneBtn() {
@@ -3950,6 +4100,202 @@ async function handleOnboardingSubmit(e) {
   document.body.classList.remove('modal-open');
   onboardingContext = null;
   render();
+  await maybePromptForFirstActivity();
+}
+
+// ------------------------------------------------------------------
+// First-time activity picker: shown after the name prompt when the user
+// has zero lists. Also used inline as the Lists-area blank state so the
+// "skip" path still points the user at how to create a list.
+// ------------------------------------------------------------------
+const SUGGESTED_FIRST_ACTIVITIES = [
+  { name: 'Climbing',    emoji: '🧗' },
+  { name: 'Hiking',      emoji: '🥾' },
+  { name: 'Skiing',      emoji: '🎿' },
+  { name: 'Backpacking', emoji: '🎒' },
+  { name: 'Camping',     emoji: '⛺' },
+];
+
+function firstActivityDismissKey() {
+  return currentUser ? `pack.onboarding.activity.dismissed.${currentUser.id}` : null;
+}
+
+function hasDismissedFirstActivityPrompt() {
+  const key = firstActivityDismissKey();
+  if (!key) return false;
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+
+function dismissFirstActivityPrompt() {
+  const key = firstActivityDismissKey();
+  if (!key) return;
+  try { localStorage.setItem(key, '1'); } catch { /* ignore storage errors */ }
+}
+
+async function createFirstActivity(name, emojiHint) {
+  if (!currentUser) return null;
+  const trimmed = (name || '').trim();
+  if (!trimmed) return null;
+  // Same session-liveness guard used by handleSaveActivity: a stale/expired
+  // JWT makes auth.uid() null at the DB, which trips the activities-insert
+  // RLS policy with a confusing message. Fail fast with a friendly toast.
+  if (!(await requireLiveSession())) return null;
+  const preset = presetForActivity({ name: trimmed });
+  const emoji = emojiHint || (preset ? preset.emoji : DEFAULT_ACTIVITY_EMOJI);
+  const position = activities.length;
+  const { data, error } = await supabase
+    .from('activities')
+    .insert({ name: trimmed, emoji, position, owner_id: currentUser.id })
+    .select()
+    .single();
+  if (error) {
+    if (isRlsError(error) && !(await requireLiveSession())) return null;
+    toast(error.message, 'error');
+    return null;
+  }
+  activities.push(data);
+  activeActivityId = data.id;
+  // Mirror the optimistic-member pattern from handleSaveActivity so the UI
+  // reflects ownership immediately without a reload.
+  membersByActivity[data.id] = [{
+    activity_id: data.id,
+    user_id: currentUser.id,
+    role: 'owner',
+    joined_at: new Date().toISOString(),
+  }];
+  render();
+  syncRealtimeSubscription();
+  return data;
+}
+
+// Build the chips + input + buttons inside `container`. Used by both the
+// onboarding modal (showSkip: true) and the Lists-area blank state
+// (showSkip: false — the blank state itself is the skip destination).
+function renderFirstActivityPicker(container, { showSkip, onCreated, onSkipped } = {}) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const input = h('input', {
+    class: 'first-activity-input',
+    type: 'text',
+    maxlength: '80',
+    autocapitalize: 'words',
+    placeholder: 'Or type your own…',
+    'aria-label': 'Custom activity name',
+  });
+  const submitBtn = h('button', {
+    class: 'btn btn-primary first-activity-submit',
+    type: 'button',
+    disabled: true,
+  }, 'Create list →');
+  const errorEl = h('div', { class: 'first-activity-error', role: 'alert', 'aria-live': 'polite' });
+  const chipsRow = h('div', { class: 'first-activity-chips', role: 'group', 'aria-label': 'Suggested activities' });
+
+  const setBusy = (busy) => {
+    chipsRow.querySelectorAll('button').forEach((b) => { b.disabled = busy; });
+    input.disabled = busy;
+    submitBtn.disabled = busy || !input.value.trim();
+  };
+
+  for (const s of SUGGESTED_FIRST_ACTIVITIES) {
+    const chip = h('button', {
+      class: 'first-activity-chip',
+      type: 'button',
+    },
+      h('span', { class: 'first-activity-chip-emoji', 'aria-hidden': 'true' }, s.emoji),
+      h('span', {}, s.name),
+    );
+    chip.addEventListener('click', async () => {
+      setBusy(true);
+      chip.classList.add('is-selected');
+      const created = await createFirstActivity(s.name, s.emoji);
+      if (created) {
+        if (typeof onCreated === 'function') onCreated(created);
+      } else {
+        setBusy(false);
+        chip.classList.remove('is-selected');
+        errorEl.textContent = "Couldn't create that list. Try again.";
+      }
+    });
+    chipsRow.appendChild(chip);
+  }
+
+  input.addEventListener('input', () => {
+    submitBtn.disabled = !input.value.trim();
+    errorEl.textContent = '';
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && input.value.trim()) {
+      e.preventDefault();
+      submitBtn.click();
+    }
+  });
+  submitBtn.addEventListener('click', async () => {
+    const val = input.value.trim();
+    if (!val) return;
+    setBusy(true);
+    const created = await createFirstActivity(val);
+    if (created) {
+      if (typeof onCreated === 'function') onCreated(created);
+    } else {
+      setBusy(false);
+      errorEl.textContent = "Couldn't create that list. Try again.";
+    }
+  });
+
+  const inputRow = h('div', { class: 'first-activity-input-row' },
+    h('label', { class: 'first-activity-input-label' }, 'Or type your own'),
+    input,
+  );
+  const actions = h('div', { class: 'first-activity-actions' }, submitBtn);
+  if (showSkip) {
+    const skipBtn = h('button', {
+      class: 'first-activity-skip',
+      type: 'button',
+      onclick: () => {
+        dismissFirstActivityPrompt();
+        if (typeof onSkipped === 'function') onSkipped();
+      },
+    }, 'Skip for now');
+    actions.appendChild(skipBtn);
+  }
+
+  container.appendChild(chipsRow);
+  container.appendChild(inputRow);
+  container.appendChild(errorEl);
+  container.appendChild(actions);
+}
+
+async function maybePromptForFirstActivity() {
+  if (!currentUser) return;
+  if (activities.length) return;
+  if (hasDismissedFirstActivityPrompt()) return;
+  // If the name-capture modal is still visible, its submit handler will chain
+  // this call — don't stack modals.
+  const nameModal = $('#onboarding-modal');
+  if (nameModal && !nameModal.classList.contains('hidden')) return;
+  showFirstActivityModal();
+}
+
+function showFirstActivityModal() {
+  const modal = $('#onboarding-activity-modal');
+  const picker = $('#onboarding-activity-picker');
+  if (!modal || !picker) return;
+  renderFirstActivityPicker(picker, {
+    showSkip: true,
+    onCreated: () => hideFirstActivityModal(),
+    onSkipped: () => hideFirstActivityModal(),
+  });
+  modal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
+function hideFirstActivityModal() {
+  const modal = $('#onboarding-activity-modal');
+  if (modal) modal.classList.add('hidden');
+  if (!document.querySelector('.modal:not(.hidden)')) {
+    document.body.classList.remove('modal-open');
+  }
 }
 
 function consumeInviteParamsFromUrl() {
@@ -4076,11 +4422,9 @@ function toggleShareLandingMode(mode) {
 async function handleShareSignupSubmit(e) {
   e.preventDefault();
   if (!pendingShareToken) return;
-  const first = $('#share-signup-first').value.trim();
-  const last = $('#share-signup-last').value.trim();
+  const fullName = $('#share-signup-name').value.trim();
   const email = $('#share-signup-email').value.trim();
-  if (!first || !last || !email) return;
-  const fullName = `${first} ${last}`;
+  if (!fullName || !email) return;
   const btn = $('#share-signup-submit');
   btn.disabled = true;
   setShareLandingStatus('Sending your magic link…');
@@ -4240,6 +4584,18 @@ function wire() {
   // Header
   $('#add-gear-btn').addEventListener('click', openAddGear);
   $('#gear-empty-add-btn').addEventListener('click', openAddGear);
+  // Gear-empty suggestion chips: open Add Gear with the name prefilled.
+  const gearSuggestions = $('#gear-empty-suggestions');
+  if (gearSuggestions) {
+    gearSuggestions.addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-gear-suggestion]');
+      if (!chip) return;
+      const label = chip.dataset.gearSuggestion;
+      openAddGear();
+      const nameInput = $('#gear-name');
+      if (nameInput) { nameInput.value = label; nameInput.focus(); }
+    });
+  }
   $('#unit-toggle').addEventListener('click', () => {
     const i = UNIT_CYCLE.indexOf(displayUnit);
     displayUnit = UNIT_CYCLE[(i + 1) % UNIT_CYCLE.length];
@@ -4249,19 +4605,6 @@ function wire() {
   $('#sign-out-btn').addEventListener('click', () => supabase.auth.signOut());
   const mobileSignOutBtn = $('#mobile-sign-out-btn');
   if (mobileSignOutBtn) mobileSignOutBtn.addEventListener('click', () => supabase.auth.signOut());
-
-  // Auth: toggle between chooser and signup form
-  $('#show-signup-btn').addEventListener('click', () => {
-    $('#auth-chooser').hidden = true;
-    $('#auth-signup').hidden = false;
-    setAuthStatus('');
-    setTimeout(() => $('#signup-name').focus(), 0);
-  });
-  $('#signup-back-btn').addEventListener('click', () => {
-    $('#auth-signup').hidden = true;
-    $('#auth-chooser').hidden = false;
-    setAuthStatus('');
-  });
 
   // Share-link landing: sign-up / sign-in forms + toggle + copy button.
   const shareSignup = $('#share-signup-form');
@@ -4275,47 +4618,73 @@ function wire() {
   const copyBtn = $('#share-link-copy');
   if (copyBtn) copyBtn.addEventListener('click', handleShareLinkCopy);
 
-  // Sign up form (new user) — collects name + email, sends magic link
-  $('#signup-form').addEventListener('submit', async (e) => {
+  // Unified sign-in form. Try existing-user first; if Supabase says the email
+  // has no account, reveal the name field and let them resubmit to create one
+  // in the same screen — no separate "Sign up" button.
+  const signinEmail = $('#signin-email');
+  const signinNameField = $('#signin-name-field');
+  const signinName = $('#signin-name');
+  const signinSubmit = $('#signin-submit');
+  let signinMode = 'signin'; // flips to 'signup' after user-not-found
+  let lastKnownEmail = '';
+
+  // If the user edits the email after we revealed the name field, collapse
+  // back to sign-in mode — the "new user" inference was tied to that email.
+  if (signinEmail) {
+    signinEmail.addEventListener('input', () => {
+      if (signinMode === 'signup' && signinEmail.value.trim() !== lastKnownEmail) {
+        signinMode = 'signin';
+        signinNameField.hidden = true;
+        signinSubmit.textContent = 'Send magic link';
+        setAuthStatus('');
+      }
+    });
+  }
+
+  $('#signin-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = $('#signup-name').value.trim();
-    const email = $('#signup-email').value.trim();
-    if (!name || !email) return;
-    $('#signup-submit').disabled = true;
-    setAuthStatus('Creating your account…');
+    const email = signinEmail.value.trim();
+    if (!email) return;
+    const name = signinName ? signinName.value.trim() : '';
+
+    // Signup mode requires a name before we create the account.
+    if (signinMode === 'signup' && !name) {
+      signinName.focus();
+      return;
+    }
+
+    signinSubmit.disabled = true;
+    setAuthStatus(signinMode === 'signup' ? 'Creating your account…' : 'Sending magic link…');
+
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: window.location.origin,
-        shouldCreateUser: true,
-        data: { full_name: name },
+        shouldCreateUser: signinMode === 'signup',
+        ...(signinMode === 'signup' ? { data: { full_name: name } } : {}),
       },
     });
-    $('#signup-submit').disabled = false;
-    if (error) { setAuthStatus(`Could not send: ${error.message}`, 'error'); return; }
-    setAuthStatus(`Check ${email} — click the link to finish signing up. You can close this tab.`, 'ok');
-  });
+    signinSubmit.disabled = false;
 
-  // Sign in form (existing user) — email only, magic link
-  $('#signin-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = $('#signin-email').value.trim();
-    if (!email) return;
-    $('#signin-submit').disabled = true;
-    setAuthStatus('Sending magic link…');
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
-    });
-    $('#signin-submit').disabled = false;
     if (error) {
-      const msg = /signups not allowed|user not found|not_found/i.test(error.message)
-        ? `No account for ${email}. Try "Sign up as a new user" above.`
-        : `Could not send: ${error.message}`;
-      setAuthStatus(msg, 'error');
+      // No account for this email yet — switch to inline signup: reveal the
+      // name field, remember the email so edits collapse us back, and flip
+      // the CTA. User resubmits in the same screen to create the account.
+      if (/signups not allowed|user not found|not_found/i.test(error.message)) {
+        signinMode = 'signup';
+        lastKnownEmail = email;
+        signinNameField.hidden = false;
+        signinSubmit.textContent = 'Create account →';
+        setAuthStatus(`No account for ${email} yet — add your name to create one.`);
+        setTimeout(() => signinName && signinName.focus(), 0);
+        return;
+      }
+      setAuthStatus(`Could not send: ${error.message}`, 'error');
       return;
     }
-    setAuthStatus(`Check ${email} — click the link to sign in. You can close this tab.`, 'ok');
+
+    const verb = signinMode === 'signup' ? 'finish signing up' : 'sign in';
+    setAuthStatus(`Check ${email} — click the link to ${verb}. You can close this tab.`, 'ok');
   });
 
   // Gear search
@@ -4392,7 +4761,7 @@ function wire() {
   $('#activity-delete-btn').addEventListener('click', handleDeleteActivity);
   $('#activity-duplicate-btn').addEventListener('click', handleDuplicateActivity);
   $('#activity-done-btn').addEventListener('click', handleActivityDoneBtn);
-  $('#activity-created-share-copy').addEventListener('click', handleActivityCreatedShareCopy);
+  $('#activity-share-copy').addEventListener('click', handleActivityShareCopy);
   $('#share-accept-btn').addEventListener('click', handleShareAcceptConfirm);
   $('#share-accept-decline-btn').addEventListener('click', handleShareAcceptDecline);
   // Enter-to-save in activity name field
@@ -4632,36 +5001,13 @@ async function onSignedIn(session) {
   showMain();
   await syncDisplayName(currentUser);
   await loadAll();
-  // Seed default activities on first login
-  if (!activities.length && !pendingInviteToken) {
-    const seed = [
-      { name: 'Climbing', emoji: '🧗', position: 0 },
-      { name: 'Highlining', emoji: '🎪', position: 1 },
-      { name: 'Paragliding', emoji: '🪂', position: 2 },
-      { name: 'Hiking', emoji: '🥾', position: 3 },
-    ];
-    const { data, error } = await supabase.from('activities').insert(seed).select();
-    if (!error && data) {
-      activities = data;
-      activeActivityId = data[0]?.id || null;
-      if (currentUser) {
-        for (const a of data) {
-          membersByActivity[a.id] = [{
-            activity_id: a.id,
-            user_id: currentUser.id,
-            role: 'owner',
-            joined_at: new Date().toISOString(),
-          }];
-        }
-      }
-      render();
-    }
-  }
   await applyPendingInvite();
   await applyPendingShareToken();
   applyPendingOpenActivity();
   syncRealtimeSubscription();
+  initAdminOnSignIn();
   await maybePromptForOnboarding();
+  await maybePromptForFirstActivity();
 }
 
 function onSignedOut() {
@@ -4669,6 +5015,8 @@ function onSignedOut() {
   onboardingContext = null;
   const onboardingModal = $('#onboarding-modal');
   if (onboardingModal) onboardingModal.classList.add('hidden');
+  const onboardingActivityModal = $('#onboarding-activity-modal');
+  if (onboardingActivityModal) onboardingActivityModal.classList.add('hidden');
   document.body.classList.remove('modal-open');
   currentUser = null;
   gearList = [];
@@ -4699,6 +5047,7 @@ function onSignedOut() {
   globalMembersChannel = null;
   globalCustomFiltersChannel = null;
   globalGearChannel = null;
+  teardownAdmin();
   const banner = $('#invite-banner');
   if (banner) banner.classList.add('hidden');
   showAuth();
@@ -4790,3 +5139,504 @@ wire();
     showAuth();
   }
 })();
+
+// ------------------------------------------------------------------
+// Admin dashboard
+// ------------------------------------------------------------------
+// Read-only, desktop-only. Visibility gated by server-side is_admin()
+// RPC; the toggle next to the logo only appears if that returns true.
+// Every admin data request re-verifies admin status server-side, so the
+// client-side flag is a UX affordance only — flipping it manually gets
+// 403 from the Edge Function for non-admins.
+
+let adminIsAdmin = false;
+let adminMode = false;
+let adminWired = false;
+let adminSummary = null;
+let adminUsers = [];
+let adminDaily = null;
+let adminChannel = null;
+let adminSortKey = 'last_sign_in_at';
+let adminSortDir = 'desc';
+let adminSearchQuery = '';
+let adminDrawerUserId = null;
+let adminRefetchTimer = null;
+let adminLiveStaleTimer = null;
+let adminLoadedOnce = false;
+
+async function initAdminOnSignIn() {
+  try {
+    const { data, error } = await supabase.rpc('is_admin');
+    if (error) {
+      console.warn('[admin] is_admin rpc error', error);
+      adminIsAdmin = false;
+    } else {
+      adminIsAdmin = data === true;
+    }
+  } catch (err) {
+    console.warn('[admin] is_admin threw', err);
+    adminIsAdmin = false;
+  }
+  const btn = $('#admin-toggle-btn');
+  if (!btn) return;
+  btn.hidden = !adminIsAdmin;
+  if (!adminIsAdmin) return;
+  wireAdminControls();
+}
+
+function teardownAdmin() {
+  adminIsAdmin = false;
+  adminMode = false;
+  adminLoadedOnce = false;
+  adminSummary = null;
+  adminUsers = [];
+  adminDaily = null;
+  adminDrawerUserId = null;
+  if (adminRefetchTimer) { clearTimeout(adminRefetchTimer); adminRefetchTimer = null; }
+  if (adminLiveStaleTimer) { clearTimeout(adminLiveStaleTimer); adminLiveStaleTimer = null; }
+  if (adminChannel) { try { supabase.removeChannel(adminChannel); } catch {} adminChannel = null; }
+  document.body.removeAttribute('data-view-mode');
+  const btn = $('#admin-toggle-btn');
+  if (btn) {
+    btn.hidden = true;
+    btn.setAttribute('aria-pressed', 'false');
+  }
+  closeAdminUserDrawer();
+}
+
+function wireAdminControls() {
+  if (adminWired) return;
+  adminWired = true;
+
+  const btn = $('#admin-toggle-btn');
+  if (btn) btn.addEventListener('click', toggleAdminView);
+
+  const refresh = $('#admin-refresh-btn');
+  if (refresh) refresh.addEventListener('click', () => loadAdminAll({ force: true }));
+
+  const search = $('#admin-users-search');
+  if (search) search.addEventListener('input', () => {
+    adminSearchQuery = (search.value || '').trim().toLowerCase();
+    renderAdminUsers();
+  });
+
+  document.querySelectorAll('#admin-view .admin-sortable').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.getAttribute('data-sort');
+      if (!key) return;
+      if (adminSortKey === key) {
+        adminSortDir = adminSortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        adminSortKey = key;
+        adminSortDir = key === 'email' || key === 'display_name' ? 'asc' : 'desc';
+      }
+      renderAdminUsers();
+    });
+  });
+
+  const closeBtn = $('#admin-user-drawer-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeAdminUserDrawer);
+  const backdrop = $('#admin-user-drawer-backdrop');
+  if (backdrop) backdrop.addEventListener('click', closeAdminUserDrawer);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('#admin-user-drawer').hidden) closeAdminUserDrawer();
+  });
+}
+
+async function toggleAdminView() {
+  adminMode = !adminMode;
+  const btn = $('#admin-toggle-btn');
+  if (btn) btn.setAttribute('aria-pressed', adminMode ? 'true' : 'false');
+  if (adminMode) {
+    document.body.setAttribute('data-view-mode', 'admin');
+    if (!adminLoadedOnce) {
+      await loadAdminAll({ force: true });
+      adminLoadedOnce = true;
+    }
+    subscribeAdminRealtime();
+  } else {
+    document.body.removeAttribute('data-view-mode');
+    unsubscribeAdminRealtime();
+    closeAdminUserDrawer();
+  }
+}
+
+async function adminFetch(view, extra = {}) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const params = new URLSearchParams({ view, ...extra });
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/admin?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      authorization: `Bearer ${session.access_token}`,
+      apikey: SUPABASE_ANON_KEY,
+    },
+  });
+  if (!res.ok) {
+    let err = `HTTP ${res.status}`;
+    try { err = (await res.json())?.error || err; } catch {}
+    throw new Error(err);
+  }
+  return res.json();
+}
+
+async function loadAdminAll({ force = false } = {}) {
+  if (!adminMode && !force) return;
+  try {
+    const [summary, users, daily] = await Promise.all([
+      adminFetch('summary'),
+      adminFetch('users'),
+      adminFetch('daily'),
+    ]);
+    adminSummary = summary;
+    adminUsers = Array.isArray(users.users) ? users.users : [];
+    adminDaily = daily;
+    renderAdminSummary();
+    renderAdminUsers();
+    renderAdminDaily();
+    if (adminDrawerUserId) refreshAdminUserDrawer();
+    markAdminLive(true);
+  } catch (err) {
+    console.error('[admin] load failed', err);
+    setStatus(`Admin load failed: ${err.message || err}`, 'error');
+  }
+}
+
+function scheduleAdminRefetch() {
+  if (!adminMode) return;
+  if (adminRefetchTimer) return; // already scheduled
+  adminRefetchTimer = setTimeout(() => {
+    adminRefetchTimer = null;
+    loadAdminAll();
+  }, 350);
+}
+
+function subscribeAdminRealtime() {
+  if (adminChannel) return;
+  adminChannel = supabase
+    .channel('admin-live')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' },        onAdminRealtimeEvent)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gear' },            onAdminRealtimeEvent)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activities' },      onAdminRealtimeEvent)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_items' },  onAdminRealtimeEvent)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'activity_members' },onAdminRealtimeEvent)
+    .subscribe((status, err) => {
+      console.log(`[realtime] admin-live=${status}`, err || '');
+      if (status === 'SUBSCRIBED') markAdminLive(true);
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') markAdminLive(false);
+    });
+}
+
+function unsubscribeAdminRealtime() {
+  if (!adminChannel) return;
+  try { supabase.removeChannel(adminChannel); } catch {}
+  adminChannel = null;
+}
+
+function onAdminRealtimeEvent(payload) {
+  if (!adminMode) return;
+  // Instant counter bump for the visible stats — feels responsive even before
+  // the debounced refetch lands.
+  if (adminSummary?.totals) {
+    const table = payload.table;
+    const map = { profiles: 'users', gear: 'gear', activities: 'activities',
+                  activity_items: 'activity_items', activity_members: 'activity_members' };
+    const key = map[table];
+    if (key) {
+      const delta = payload.eventType === 'INSERT' ? 1
+                   : payload.eventType === 'DELETE' ? -1
+                   : 0;
+      if (delta !== 0) {
+        adminSummary.totals[key] = Math.max(0, (adminSummary.totals[key] || 0) + delta);
+        renderAdminSummary({ flashKey: key });
+      }
+    }
+  }
+  markAdminLive(true);
+  scheduleAdminRefetch();
+}
+
+function markAdminLive(isLive) {
+  const el = $('#admin-live-indicator');
+  if (!el) return;
+  if (isLive) {
+    el.classList.remove('is-stale');
+    el.querySelector('.admin-live-label').textContent = 'Live';
+    if (adminLiveStaleTimer) clearTimeout(adminLiveStaleTimer);
+    // If no event or refetch happens in 60s, surface that subtly.
+    adminLiveStaleTimer = setTimeout(() => {
+      el.classList.add('is-stale');
+      el.querySelector('.admin-live-label').textContent = 'Idle';
+    }, 60_000);
+  } else {
+    el.classList.add('is-stale');
+    el.querySelector('.admin-live-label').textContent = 'Reconnecting…';
+  }
+}
+
+// ------- Rendering helpers -------
+
+function renderAdminSummary({ flashKey = null } = {}) {
+  if (!adminSummary) return;
+  const { totals = {}, active = {} } = adminSummary;
+  const entries = [
+    ['users', totals.users, active.new_7d != null ? `+${active.new_7d} this week` : ''],
+    ['gear', totals.gear, ''],
+    ['activities', totals.activities, ''],
+    ['activity_items', totals.activity_items, ''],
+    ['activity_members', totals.activity_members, ''],
+  ];
+  for (const [key, value, sub] of entries) {
+    const card = document.querySelector(`.admin-stat-card[data-stat="${key}"]`);
+    if (!card) continue;
+    const v = card.querySelector('.admin-stat-value');
+    const s = card.querySelector('.admin-stat-sub');
+    if (v) v.textContent = fmtInt(value);
+    if (s) s.textContent = sub;
+    if (flashKey === key) {
+      card.classList.remove('is-flash');
+      // Re-trigger animation
+      void card.offsetWidth;
+      card.classList.add('is-flash');
+    }
+  }
+  const activeCard = document.querySelector('.admin-stat-card[data-stat="active"]');
+  if (activeCard) {
+    activeCard.querySelector('.admin-stat-value').textContent =
+      `${fmtInt(active.last_7d)} / ${fmtInt(active.last_24h)}`;
+    activeCard.querySelector('.admin-stat-sub').textContent = 'signed in recently';
+  }
+}
+
+function renderAdminUsers() {
+  const tbody = $('#admin-users-tbody');
+  if (!tbody) return;
+  const empty = $('#admin-users-empty');
+  let rows = adminUsers.slice();
+  if (adminSearchQuery) {
+    const q = adminSearchQuery;
+    rows = rows.filter((u) =>
+      (u.email || '').toLowerCase().includes(q) ||
+      (u.display_name || '').toLowerCase().includes(q),
+    );
+  }
+  rows.sort((a, b) => {
+    const va = a[adminSortKey];
+    const vb = b[adminSortKey];
+    let cmp = 0;
+    if (va == null && vb == null) cmp = 0;
+    else if (va == null) cmp = 1;
+    else if (vb == null) cmp = -1;
+    else if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb));
+    return adminSortDir === 'asc' ? cmp : -cmp;
+  });
+  // Sort-direction arrows
+  document.querySelectorAll('#admin-view .admin-sortable').forEach((th) => {
+    const k = th.getAttribute('data-sort');
+    if (k === adminSortKey) th.setAttribute('data-sort-dir', adminSortDir);
+    else th.removeAttribute('data-sort-dir');
+  });
+  tbody.innerHTML = '';
+  for (const u of rows) {
+    const tr = document.createElement('tr');
+    tr.dataset.userId = u.id;
+    tr.addEventListener('click', () => openAdminUserDrawer(u.id));
+    tr.innerHTML = `
+      <td>${escapeHtml(u.email || '—')}</td>
+      <td class="${u.display_name ? '' : 'admin-cell-muted'}">${escapeHtml(u.display_name || '—')}</td>
+      <td class="admin-cell-muted">${fmtDate(u.created_at)}</td>
+      <td class="admin-cell-muted">${fmtRelative(u.last_sign_in_at)}</td>
+      <td class="num">${fmtInt(u.gear_count)}</td>
+      <td class="num">${fmtInt(u.activities_count)}</td>
+      <td class="num">${fmtInt(u.items_added_count)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  if (empty) empty.hidden = rows.length > 0;
+}
+
+function renderAdminDaily() {
+  const host = $('#admin-daily-chart');
+  if (!host || !adminDaily) return;
+  const dayKeys = Object.keys(adminDaily.signups || {}).sort();
+  if (dayKeys.length === 0) { host.innerHTML = '<p class="muted">No data.</p>'; return; }
+  const rows = [
+    ['signups', 'Signups', adminDaily.signups],
+    ['gear',    'Gear',    adminDaily.gear],
+    ['items',   'Items',   adminDaily.items],
+  ];
+  let maxAll = 1;
+  for (const [, , bucket] of rows) {
+    for (const k of dayKeys) maxAll = Math.max(maxAll, bucket[k] || 0);
+  }
+  host.innerHTML = '';
+  for (const [kind, label, bucket] of rows) {
+    const row = document.createElement('div');
+    row.className = 'admin-daily-row';
+    const lbl = document.createElement('div');
+    lbl.className = 'admin-daily-row-label';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+    const bars = document.createElement('div');
+    bars.className = 'admin-daily-bars';
+    for (const day of dayKeys) {
+      const value = bucket[day] || 0;
+      const bar = document.createElement('div');
+      bar.className = 'admin-daily-bar';
+      bar.dataset.kind = kind;
+      const pct = maxAll > 0 ? (value / maxAll) * 100 : 0;
+      bar.style.height = value === 0 ? '2px' : `${Math.max(4, pct)}%`;
+      bar.title = `${day}: ${value} ${label.toLowerCase()}`;
+      bars.appendChild(bar);
+    }
+    row.appendChild(bars);
+    host.appendChild(row);
+  }
+}
+
+async function openAdminUserDrawer(userId) {
+  adminDrawerUserId = userId;
+  const drawer = $('#admin-user-drawer');
+  const backdrop = $('#admin-user-drawer-backdrop');
+  if (drawer) drawer.hidden = false;
+  if (backdrop) backdrop.hidden = false;
+  const title = $('#admin-user-drawer-title');
+  const subtitle = $('#admin-user-drawer-subtitle');
+  const row = adminUsers.find((u) => u.id === userId);
+  if (title) title.textContent = row?.display_name || row?.email || 'User';
+  if (subtitle) subtitle.textContent = row?.email || '';
+  const body = $('#admin-user-drawer-body');
+  if (body) body.innerHTML = '<p class="muted">Loading…</p>';
+  await refreshAdminUserDrawer();
+}
+
+function closeAdminUserDrawer() {
+  adminDrawerUserId = null;
+  const drawer = $('#admin-user-drawer');
+  const backdrop = $('#admin-user-drawer-backdrop');
+  if (drawer) drawer.hidden = true;
+  if (backdrop) backdrop.hidden = true;
+}
+
+async function refreshAdminUserDrawer() {
+  if (!adminDrawerUserId) return;
+  const body = $('#admin-user-drawer-body');
+  if (!body) return;
+  try {
+    const data = await adminFetch('user', { id: adminDrawerUserId });
+    const sections = [];
+    // Profile
+    const u = data.user || {};
+    const p = data.profile || {};
+    sections.push(`
+      <div>
+        <h4 class="admin-section-heading">Profile</h4>
+        <dl class="admin-kv">
+          <dt>Email</dt><dd>${escapeHtml(u.email || '—')}</dd>
+          <dt>Display name</dt><dd>${escapeHtml(p.display_name || '—')}</dd>
+          <dt>Signed up</dt><dd>${fmtDate(u.created_at)}</dd>
+          <dt>Last seen</dt><dd>${fmtRelative(u.last_sign_in_at)}</dd>
+          <dt>Unit</dt><dd>${escapeHtml(p.display_unit || '—')}</dd>
+          <dt>User ID</dt><dd><code style="font-size:11px;">${escapeHtml(u.id || '—')}</code></dd>
+        </dl>
+      </div>
+    `);
+    // Activities
+    const acts = data.activities || [];
+    sections.push(`
+      <div>
+        <h4 class="admin-section-heading">Lists (${acts.length})</h4>
+        ${acts.length === 0 ? '<p class="muted">No lists yet.</p>' : `
+          <ul class="admin-mini-list">
+            ${acts.map((a) => `
+              <li>
+                <span>${escapeHtml(a.emoji || '📋')} ${escapeHtml(a.name || 'Untitled')}</span>
+                <span class="admin-mini-sub">${fmtInt(a.item_count)} items · ${fmtInt(a.member_count)} members</span>
+              </li>
+            `).join('')}
+          </ul>
+        `}
+      </div>
+    `);
+    // Gear
+    const gear = data.gear || [];
+    sections.push(`
+      <div>
+        <h4 class="admin-section-heading">Gear (${gear.length})</h4>
+        ${gear.length === 0 ? '<p class="muted">No gear in library.</p>' : `
+          <ul class="admin-mini-list">
+            ${gear.slice(0, 50).map((g) => `
+              <li>
+                <span>${escapeHtml(g.name || 'Untitled')}${g.brand ? ` <span class="muted">· ${escapeHtml(g.brand)}</span>` : ''}</span>
+                <span class="admin-mini-sub">${g.weight_grams != null ? `${fmtInt(g.weight_grams)} g` : ''}${g.quantity > 1 ? ` × ${g.quantity}` : ''}</span>
+              </li>
+            `).join('')}
+            ${gear.length > 50 ? `<li class="muted">…and ${gear.length - 50} more</li>` : ''}
+          </ul>
+        `}
+      </div>
+    `);
+    // Recent items
+    const recent = data.recent_items || [];
+    sections.push(`
+      <div>
+        <h4 class="admin-section-heading">Recent additions (${recent.length})</h4>
+        ${recent.length === 0 ? '<p class="muted">No recent activity.</p>' : `
+          <ul class="admin-mini-list">
+            ${recent.map((r) => `
+              <li>
+                <span>${escapeHtml(r.gear_name || '(unknown gear)')}${r.quantity > 1 ? ` × ${r.quantity}` : ''}</span>
+                <span class="admin-mini-sub">${fmtRelative(r.created_at)}</span>
+              </li>
+            `).join('')}
+          </ul>
+        `}
+      </div>
+    `);
+    body.innerHTML = sections.join('');
+  } catch (err) {
+    body.innerHTML = `<p class="muted" style="color:var(--danger)">Failed to load: ${escapeHtml(err.message || String(err))}</p>`;
+  }
+}
+
+// ------- Tiny formatting helpers (scoped to admin) -------
+
+function fmtInt(n) {
+  if (n == null || isNaN(n)) return '0';
+  return new Intl.NumberFormat().format(Math.round(n));
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch { return '—'; }
+}
+
+function fmtRelative(iso) {
+  if (!iso) return 'never';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '—';
+  const diff = Date.now() - t;
+  const s = Math.round(diff / 1000);
+  if (s < 60) return 'just now';
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return fmtDate(iso);
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}

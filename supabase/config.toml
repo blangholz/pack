@@ -426,6 +426,12 @@ verify_jwt = false
 # verify_jwt = false because the caller is a Vercel cron, not a signed-in user.
 verify_jwt = false
 
+[functions.admin]
+# Gateway can't verify ES256 session JWTs. requireAuth() + is_admin() inside
+# the function do the real gating; the function also uses the service-role
+# key for cross-user reads only after admin identity is confirmed.
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

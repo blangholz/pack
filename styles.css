@@ -260,6 +260,8 @@ body.modal-open #main-view { overflow: hidden; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark { font-size: 22px; }
 .brand h1 { font-size: 18px; letter-spacing: -0.01em; }
+a.brand-home { color: inherit; text-decoration: none; cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; transition: background 0.15s; }
+a.brand-home:hover { background: var(--bg-elev-2); }
 .header-actions { display: flex; gap: 8px; align-items: center; }
 
 /* ============ Buttons ============ */
@@ -2080,7 +2082,8 @@ img.brand-badge-logo {
 .activity-picker-main.in-list { opacity: 0.7; cursor: default; }
 .activity-picker-main.in-list:hover { background: var(--bg-elev-2); border-color: var(--border); }
 .activity-picker-main.in-list:active { transform: none; }
-.activity-picker-remove {
+.activity-picker-remove,
+.activity-picker-increment {
   flex-shrink: 0;
   width: 44px;
   border: 1px solid var(--border);
@@ -2098,7 +2101,13 @@ img.brand-badge-logo {
   color: var(--danger);
   border-color: var(--danger);
 }
-.activity-picker-remove:active { transform: scale(0.94); }
+.activity-picker-increment:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.activity-picker-remove:active,
+.activity-picker-increment:active { transform: scale(0.94); }
 .activity-picker-emoji { font-size: 22px; line-height: 1; }
 .activity-picker-name { flex: 1; font-weight: 500; }
 .activity-picker-add {
@@ -2718,6 +2727,104 @@ img.brand-badge-logo {
   .onboarding-sub { font-size: 14px; }
 }
 
+/* ================= First-activity picker (onboarding + blank state) ================= */
+.first-activity-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+.first-activity-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.first-activity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 14px;
+  font-size: 15px;
+  font-weight: 500;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, transform 80ms;
+}
+.first-activity-chip:hover { background: var(--bg-elev-3, var(--bg-elev-2)); }
+.first-activity-chip:active { transform: scale(0.97); }
+.first-activity-chip.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev-2));
+}
+.first-activity-chip-emoji { font-size: 18px; line-height: 1; }
+.first-activity-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.first-activity-input-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.first-activity-input { /* shares sizing/feel with .onboarding-input */
+  font-size: 16px;
+  padding: 12px 14px;
+  min-height: 48px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+.first-activity-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.first-activity-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.first-activity-submit {
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.first-activity-skip {
+  min-height: 44px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+.first-activity-skip:hover { color: var(--text); }
+.first-activity-error {
+  min-height: 18px;
+  font-size: 13px;
+  color: var(--danger);
+}
+.first-activity-error:empty { min-height: 0; }
+
+/* When rendered inline as the blank state (not inside the onboarding modal),
+   give it a little breathing room and a soft heading so it reads as empty-state. */
+.empty-state .first-activity-picker { margin-top: 12px; }
+
+/* Gear-empty suggestion chips — "Or start with a suggestion:" label +
+   chip row mirrors the first-activity-picker look for visual consistency. */
+.gear-empty-suggestions-label { margin: 16px 0 10px 0; font-size: 13px; }
+.gear-empty-chips { justify-content: center; }
+
+@media (max-width: 600px) {
+  .first-activity-chip { font-size: 14px; padding: 8px 12px; }
+}
+
 /* Mobile: give share modal roomy touch targets */
 @media (max-width: 600px) {
   .share-activity-btn {
@@ -2856,25 +2963,9 @@ img.brand-badge-logo {
   .invite-skeleton { animation: none; }
 }
 
-/* First + last name grid: side-by-side on desktop, stacked on mobile */
-.invite-name-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.invite-name-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.invite-name-field label { font-size: 12px; color: var(--text-muted); margin-bottom: -4px; }
-.invite-name-field input {
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  outline: none;
-  min-width: 0;
-}
-.invite-name-field input:focus { border-color: var(--accent); }
+/* Inline hint under the name field that appears when the sign-in form
+   detects a new email and flips into progressive-signup mode. */
+.signin-name-hint { margin: 4px 0 0 0; font-size: 12px; }
 
 /* Sign-up ⇄ sign-in toggle area (no divider rules) */
 .share-landing-toggle { margin-top: 14px; margin-bottom: 0; }
@@ -2926,40 +3017,15 @@ img.brand-badge-logo {
   color: var(--accent-text);
 }
 
-/* Post-create success view inside the activity modal. Appears once a new
-   list is saved so the user can grab the share link without a second trip
-   through the share modal. */
-.activity-created-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 2px 0 14px;
+/* Inline share-link section that appears below the form fields after a
+   new list is created. Top border separates it from the name/email inputs
+   so the reveal reads as "new state" rather than "more form to fill". */
+#activity-share-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
-.activity-created-emoji {
-  flex: 0 0 48px;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--bg-elev-2);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  line-height: 1;
-}
-.activity-created-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.activity-created-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text);
-  letter-spacing: -0.01em;
-}
-.activity-created-sub {
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.activity-created-emails-note {
+.activity-share-emails-note {
   margin: 10px 0 0 0;
   font-size: 12px;
 }
@@ -2971,10 +3037,7 @@ img.brand-badge-logo {
   box-shadow: none;
 }
 
-/* Mobile: stack first/last name inputs, stack copy button below URL */
-@media (max-width: 500px) {
-  .invite-name-row { grid-template-columns: 1fr; gap: 8px; }
-}
+/* Mobile: stack copy button below URL */
 @media (max-width: 600px) {
   .invite-card { max-width: 100%; padding: 16px; }
   .invite-activity { font-size: 17px; }
@@ -2985,4 +3048,370 @@ img.brand-badge-logo {
     min-height: 44px;
   }
   .share-link-url { min-height: 44px; font-size: 14px; }
+}
+
+/* ============================================================
+   Admin dashboard
+   Desktop-only toggle + read-only admin view. Reuses the app's
+   existing color tokens — no new palette entries.
+   ============================================================ */
+
+/* Hide .desktop-only elements on mobile widths so the admin toggle
+   (and anything else we flag this way) stays desktop-first. */
+@media (max-width: 820px) {
+  .desktop-only { display: none !important; }
+}
+
+.admin-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-left: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.admin-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.admin-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.admin-toggle[aria-pressed="true"]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.admin-toggle-icon { font-size: 14px; line-height: 1; }
+
+/* When admin mode is on, hide the regular user UI and reveal the dashboard. */
+body[data-view-mode="admin"] .app-main { display: none; }
+body[data-view-mode="admin"] #mobile-tab-bar { display: none !important; }
+body[data-view-mode="admin"] #admin-view { display: flex; }
+
+.admin-view {
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.admin-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.admin-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.admin-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.admin-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5);
+  animation: admin-live-pulse 2s infinite;
+}
+.admin-live.is-stale .admin-live-dot {
+  background: var(--warning);
+  animation: none;
+}
+@keyframes admin-live-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.5); }
+  70%  { box-shadow: 0 0 0 8px rgba(74, 222, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+#admin-refresh-btn { margin-left: auto; }
+
+/* Stats grid — 3 cols on medium, 6 cols on wide. */
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+@media (min-width: 1080px) {
+  .admin-stats-grid { grid-template-columns: repeat(6, 1fr); }
+}
+.admin-stat-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.admin-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.admin-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.admin-stat-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  min-height: 16px;
+}
+.admin-stat-card.is-flash {
+  animation: admin-stat-flash 700ms ease-out;
+}
+@keyframes admin-stat-flash {
+  0%   { background: var(--accent); color: var(--accent-text); }
+  100% { background: var(--bg-elev); color: var(--text); }
+}
+
+/* Shared card surface for the chart / users table. */
+.admin-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.admin-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.admin-card-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Daily chart — 3 parallel rows of bars. */
+.admin-daily-legend {
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.admin-daily-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.admin-daily-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.admin-daily-swatch-signups { background: var(--accent); }
+.admin-daily-swatch-gear    { background: var(--success); }
+.admin-daily-swatch-items   { background: var(--warning); }
+
+.admin-daily-chart {
+  display: grid;
+  grid-template-rows: repeat(3, 1fr);
+  gap: 8px;
+  min-height: 160px;
+}
+.admin-daily-row {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.admin-daily-row-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.admin-daily-bars {
+  display: grid;
+  grid-template-columns: repeat(30, 1fr);
+  gap: 2px;
+  align-items: end;
+  min-height: 40px;
+}
+.admin-daily-bar {
+  min-height: 2px;
+  border-radius: 2px;
+  opacity: 0.7;
+  transition: height 200ms, opacity 120ms;
+}
+.admin-daily-bar:hover { opacity: 1; }
+.admin-daily-bar[data-kind="signups"] { background: var(--accent); }
+.admin-daily-bar[data-kind="gear"]    { background: var(--success); }
+.admin-daily-bar[data-kind="items"]   { background: var(--warning); }
+
+/* Users table. */
+.admin-search {
+  margin-left: auto;
+  padding: 6px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  min-width: 220px;
+}
+.admin-users-table-wrap {
+  overflow-x: auto;
+}
+.admin-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.admin-users-table th,
+.admin-users-table td {
+  padding: 9px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.admin-users-table th {
+  font-weight: 600;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-elev-2);
+  position: sticky;
+  top: 0;
+}
+.admin-users-table th.num,
+.admin-users-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.admin-sortable { cursor: pointer; user-select: none; }
+.admin-sortable:hover { color: var(--text); }
+.admin-sortable[data-sort-dir="asc"]::after  { content: " ▲"; font-size: 10px; opacity: 0.8; }
+.admin-sortable[data-sort-dir="desc"]::after { content: " ▼"; font-size: 10px; opacity: 0.8; }
+.admin-users-table tbody tr {
+  cursor: pointer;
+  transition: background 80ms;
+}
+.admin-users-table tbody tr:hover { background: var(--bg-hover); }
+.admin-users-table tbody tr.is-flash {
+  animation: admin-row-flash 900ms ease-out;
+}
+@keyframes admin-row-flash {
+  0%   { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  100% { background: transparent; }
+}
+.admin-users-table td.admin-cell-muted { color: var(--text-dim); }
+.admin-empty { padding: 20px; text-align: center; }
+
+/* User detail drawer — right-side slide-in. */
+.admin-user-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 90;
+}
+.admin-user-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: min(520px, 100%);
+  height: 100%;
+  background: var(--bg-elev);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.admin-user-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.admin-user-drawer-header h3 {
+  margin: 0 0 2px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.admin-user-drawer-header p { margin: 0; font-size: 12px; }
+#admin-user-drawer-close { margin-left: auto; }
+.admin-user-drawer-body {
+  padding: 16px 18px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.admin-section-heading {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+.admin-kv dt { color: var(--text-dim); }
+.admin-kv dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.admin-mini-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.admin-mini-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.admin-mini-list li .admin-mini-sub {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
