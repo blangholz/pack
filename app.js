@@ -5252,6 +5252,8 @@ function teardownAdmin() {
   if (adminLiveStaleTimer) { clearTimeout(adminLiveStaleTimer); adminLiveStaleTimer = null; }
   if (adminChannel) { try { supabase.removeChannel(adminChannel); } catch {} adminChannel = null; }
   document.body.removeAttribute('data-view-mode');
+  const adminViewEl = $('#admin-view');
+  if (adminViewEl) adminViewEl.hidden = true;
   const btn = $('#admin-toggle-btn');
   if (btn) {
     btn.hidden = true;
@@ -5303,6 +5305,8 @@ async function toggleAdminView() {
   adminMode = !adminMode;
   const btn = $('#admin-toggle-btn');
   if (btn) btn.setAttribute('aria-pressed', adminMode ? 'true' : 'false');
+  const adminViewEl = $('#admin-view');
+  if (adminViewEl) adminViewEl.hidden = !adminMode;
   if (adminMode) {
     document.body.setAttribute('data-view-mode', 'admin');
     if (!adminLoadedOnce) {

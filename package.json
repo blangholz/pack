@@ -5,6 +5,9 @@
   "scripts": {
     "og:build": "node scripts/generate-og-image.mjs"
   },
+  "dependencies": {
+    "@vercel/edge": "^1.1.2"
+  },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2"
   }
