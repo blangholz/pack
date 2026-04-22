@@ -66,6 +66,113 @@ const WEATHER_TYPES = [
   { id: 'snow',  label: 'Snow',  emoji: '🌨' },
 ];
 
+// Keyword heuristics for smart empty-state suggestions + dynamic filter-hint
+// examples. `match` identifies the activity from its name; `keywords` are
+// substrings we scan gear names/notes for when pulling library items that
+// belong in this kind of list; `generic` are the text-only fallbacks we show
+// when the user's library doesn't have anything matching; `filterExamples`
+// is what we show in the "Tap + to add (e.g. …)" hint.
+const ACTIVITY_PRESETS = [
+  { match: /hik|trail|trek|backpack/i, label: 'hiking',
+    keywords: ['hik','boot','daypack','trek','pole','gaiter','blister','map','compass'],
+    generic: ['Hiking boots','Daypack','Trekking poles','Blister kit','Map / GPS'],
+    filterExamples: 'Day hike, Backpacking' },
+  { match: /climb|whitney|alpine|crag|boulder|trad|sport/i, label: 'climbing',
+    keywords: ['climb','harness','chalk','quickdraw','cam','nut','rope','belay','crash pad','approach','rappel'],
+    generic: ['Harness','Climbing shoes','Chalk bag','Helmet','Belay device'],
+    filterExamples: 'Trad, Sport, Bouldering' },
+  { match: /ski|snowboard|split|skin/i, label: 'skiing',
+    keywords: ['ski','snowboard','goggle','skin','avy','probe','beacon','shovel','helmet'],
+    generic: ['Skis or snowboard','Boots','Goggles','Gloves','Avy beacon'],
+    filterExamples: 'Resort, Backcountry' },
+  { match: /camp|overnight|bivy/i, label: 'camping',
+    keywords: ['tent','sleeping','pad','stove','bivy','tarp','fuel','headlamp','lantern'],
+    generic: ['Tent','Sleeping bag','Sleeping pad','Stove','Headlamp'],
+    filterExamples: 'Car camp, Backpacking' },
+  { match: /bike|cycl|mtb|gravel/i, label: 'cycling',
+    keywords: ['bike','cycl','saddle','pedal','tube','chain','helmet'],
+    generic: ['Helmet','Gloves','Water bottle','Repair kit','Bike lights'],
+    filterExamples: 'Road, Gravel, MTB' },
+  { match: /run|marathon|jog/i, label: 'running',
+    keywords: ['run','shoe','short'],
+    generic: ['Running shoes','Shorts','Moisture-wicking top','Water bottle'],
+    filterExamples: 'Trail, Road' },
+  { match: /paragli|fly|speed ?fly|acro/i, label: 'flying',
+    keywords: ['glider','wing','harness','reserve','vario','helmet'],
+    generic: ['Paraglider / wing','Harness','Helmet','Reserve','Vario'],
+    filterExamples: 'XC, Acro' },
+  { match: /highlin|slackline/i, label: 'highlining',
+    keywords: ['webbing','slackline','leash','backup','sling','anchor'],
+    generic: ['Webbing','Tensioning system','Harness','Leash'],
+    filterExamples: 'Longline, Waterline' },
+];
+
+// Keywords/generic fallbacks that apply regardless of activity — the
+// "layers + essentials" that basically any outdoor list wants.
+const UNIVERSAL_KEYWORDS = [
+  'jacket','hoody','hoodie','fleece','puffy','shell','layer','houdini','nano puff','down','rain',
+  'pants','beanie','hat','sunscreen','water bottle','bladder','headlamp','knife','first aid',
+  'snack','bar','sunglass','buff','glove','sock',
+];
+const UNIVERSAL_GENERIC = ['Rain shell','Warm layer','Sun hat','Sunscreen','Water bottle','Snacks'];
+
+function presetForActivity(activity) {
+  const name = (activity?.name || '').toLowerCase();
+  return ACTIVITY_PRESETS.find((p) => p.match.test(name)) || null;
+}
+
+function gearMatchesKeyword(gear, keywords) {
+  if (!gear) return false;
+  const hay = `${gear.name || ''} ${gear.notes || ''} ${gear.brand || ''}`.toLowerCase();
+  return keywords.some((kw) => hay.includes(kw));
+}
+
+// Build a ranked suggestion set for an empty list. Returns:
+//   { linked: [gear, …], generic: [labelString, …] }
+// `linked` = items already in the user's gear library that the keywords hit.
+// `generic` = text-only fallbacks for items the user probably still needs but
+// doesn't have in their library yet.
+function suggestionsForActivity(activity) {
+  const preset = presetForActivity(activity);
+  const activityKeywords = preset ? preset.keywords : [];
+  const allKeywords = [...activityKeywords, ...UNIVERSAL_KEYWORDS];
+
+  const existingIds = new Set((itemsFor(activity.id) || []).map((it) => it.gear_id));
+  const linked = [];
+  const seen = new Set();
+  for (const gear of gearList) {
+    if (existingIds.has(gear.id)) continue;
+    if (seen.has(gear.id)) continue;
+    if (gearMatchesKeyword(gear, allKeywords)) {
+      linked.push(gear);
+      seen.add(gear.id);
+    }
+    if (linked.length >= 6) break;
+  }
+
+  // Generic fallbacks — dedupe against anything we already showed as a linked
+  // library item (substring match, case-insensitive) so we don't say "Rain
+  // shell" as a generic when they already have a "Patagonia rain shell" in
+  // the linked section.
+  const linkedNames = linked.map((g) => (g.name || '').toLowerCase());
+  const genericPool = preset
+    ? [...preset.generic, ...UNIVERSAL_GENERIC]
+    : [...UNIVERSAL_GENERIC];
+  const generic = [];
+  const seenGeneric = new Set();
+  for (const label of genericPool) {
+    const key = label.toLowerCase();
+    if (seenGeneric.has(key)) continue;
+    seenGeneric.add(key);
+    const overlaps = linkedNames.some((n) => n.includes(key) || key.split(/\s+/).every((t) => n.includes(t)));
+    if (overlaps) continue;
+    generic.push(label);
+    if (generic.length >= 6) break;
+  }
+
+  return { linked, generic, preset };
+}
+
 // Known outdoor / climbing / paragliding brand palettes. Keys are lowercase.
 // `domain` is fetched via Google's favicon service to render a tiny logo image.
 // abbr/bg/fg are the fallback badge shown when the logo fails to load.
@@ -129,6 +236,7 @@ let itemsByActivity = {};             // activity_id -> array of activity_items 
 let customFiltersByActivity = {};     // activity_id -> array of custom_filters rows
 let membersByActivity = {};           // activity_id -> array of {activity_id, user_id, role, joined_at}
 let invitesByActivity = {};           // activity_id (owner only) -> array of pending invites
+let viewsByActivity = {};             // activity_id -> {last_seen_at, digest_sent_at} for current user
 let profilesById = {};                // user_id -> {id, display_name, email}
 let foreignGearById = {};             // gear_id -> gear row (for gear owned by co-members)
 let activeActivityId = null;
@@ -146,6 +254,13 @@ let realtimeChannelActivityId = null;
 let shareModalActivityId = null;
 let pendingInviteToken = null;        // consumed from ?invite= on boot, applied after sign-in
 let pendingOpenActivityId = null;     // consumed from ?activity= on boot, applied after sign-in
+// onSignedIn fires from multiple code paths (boot IIFE, auth state change,
+// token-hash verify). Guard against concurrent/duplicate runs per user so we
+// don't seed defaults twice or re-run loadAll uselessly.
+let signedInForUserId = null;
+// Captured from accept-invite so the onboarding modal can say "Ben invited
+// you to 'Sierra Traverse'". Cleared after the modal renders once.
+let onboardingContext = null;
 
 // ------------------------------------------------------------------
 // DOM helpers
@@ -320,13 +435,14 @@ async function loadAll() {
   const gearQuery = myId
     ? supabase.from('gear').select('*').eq('owner_id', myId).order('created_at', { ascending: false })
     : supabase.from('gear').select('*').order('created_at', { ascending: false });
-  const [gearRes, actRes, itemRes, filterRes, memberRes, inviteRes] = await Promise.all([
+  const [gearRes, actRes, itemRes, filterRes, memberRes, inviteRes, viewRes] = await Promise.all([
     gearQuery,
     supabase.from('activities').select('*').order('position', { ascending: true }),
     supabase.from('activity_items').select('*').order('position', { ascending: true }),
     supabase.from('custom_filters').select('*').order('position', { ascending: true }),
     supabase.from('activity_members').select('*'),
     supabase.from('activity_invites').select('*').is('accepted_at', null),
+    supabase.from('activity_views').select('*'),
   ]);
   for (const [name, res] of [
     ['gear', gearRes], ['activities', actRes], ['items', itemRes],
@@ -334,10 +450,10 @@ async function loadAll() {
   ]) {
     if (res.error) { setStatus(`Load ${name}: ${res.error.message}`, 'error'); return; }
   }
-  // Members + invites are optional (shared-activities feature). If their
-  // tables are missing or unreachable, log and treat as empty rather than
-  // blocking core data (gear, activities, items, filters) from loading.
-  for (const [name, res] of [['members', memberRes], ['invites', inviteRes]]) {
+  // Members + invites + views are optional (shared-activities feature). If
+  // their tables are missing or unreachable, log and treat as empty rather
+  // than blocking core data (gear, activities, items, filters) from loading.
+  for (const [name, res] of [['members', memberRes], ['invites', inviteRes], ['views', viewRes]]) {
     if (res.error) console.warn(`Load ${name}: ${res.error.message}`);
   }
   gearList = gearRes.data || [];
@@ -358,6 +474,10 @@ async function loadAll() {
   for (const inv of inviteRes.data || []) {
     (invitesByActivity[inv.activity_id] ||= []).push(inv);
   }
+  viewsByActivity = {};
+  for (const v of viewRes.data || []) {
+    viewsByActivity[v.activity_id] = v;
+  }
   if (!activeActivityId || !activities.some((a) => a.id === activeActivityId)) {
     activeActivityId = activities[0]?.id || null;
   }
@@ -366,6 +486,9 @@ async function loadAll() {
   setStatus('');
   render();
   syncRealtimeSubscription();
+  // Whatever the user lands on at boot, mark it as seen so the badge there
+  // clears immediately on next render.
+  if (activeActivityId) markActivitySeen(activeActivityId);
 }
 
 // Gear rows referenced by activity_items but not in the user's own library —
@@ -420,7 +543,7 @@ async function loadCoMemberProfiles() {
   }
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, display_name')
+    .select('id, display_name, email')
     .in('id', Array.from(needed));
   const next = {};
   if (currentUser?.id) {
@@ -433,7 +556,7 @@ async function loadCoMemberProfiles() {
   if (error) {
     console.warn('loadCoMemberProfiles error', error);
   } else {
-    for (const p of data || []) next[p.id] = { ...p, email: null };
+    for (const p of data || []) next[p.id] = p;
   }
   profilesById = next;
 }
@@ -442,7 +565,10 @@ function activeActivity() {
   return activities.find((a) => a.id === activeActivityId) || null;
 }
 function itemsFor(activityId) {
-  return itemsByActivity[activityId] || [];
+  const arr = itemsByActivity[activityId] || [];
+  // Always render items by position so all members see the same order,
+  // regardless of whether rows arrived via initial load or realtime events.
+  return [...arr].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 }
 function customFiltersFor(activityId) {
   return customFiltersByActivity[activityId] || [];
@@ -460,29 +586,126 @@ function isOwnerOf(activityId) {
   const a = activities.find((x) => x.id === activityId);
   return !!(a && currentUser && a.owner_id === currentUser.id);
 }
+// Items added by other members since the user last opened this activity (or
+// since they joined, whichever is later). Items the current user added are
+// excluded — they're not "new" to them.
+function unreadCountFor(activityId) {
+  const me = currentUser?.id;
+  if (!me) return 0;
+  const items = itemsByActivity[activityId] || [];
+  if (items.length === 0) return 0;
+  const view = viewsByActivity[activityId];
+  const myMembership = (membersByActivity[activityId] || []).find((m) => m.user_id === me);
+  // Don't count anything from before the user joined the activity.
+  const baseline = view?.last_seen_at || myMembership?.joined_at || null;
+  if (!baseline) return 0;
+  const baselineMs = Date.parse(baseline);
+  let n = 0;
+  for (const it of items) {
+    if (!it.added_by || it.added_by === me) continue;
+    if (Date.parse(it.created_at) > baselineMs) n++;
+  }
+  return n;
+}
+// Fire-and-forget RPC + optimistic local update so the badge clears
+// immediately on tab open. Concurrent renders see the new last_seen_at right
+// away rather than waiting for the round trip.
+async function markActivitySeen(activityId) {
+  if (!activityId || !currentUser?.id) return;
+  const now = new Date().toISOString();
+  const prev = viewsByActivity[activityId];
+  if (prev?.last_seen_at && Date.parse(prev.last_seen_at) > Date.now() - 2000) {
+    // Already marked seen within the last couple seconds — skip the round trip
+    // (avoids a flood when multiple item-insert events arrive in quick succession).
+    return;
+  }
+  viewsByActivity[activityId] = { ...(prev || {}), activity_id: activityId, last_seen_at: now };
+  try {
+    const { error } = await supabase.rpc('mark_activity_seen', { p_activity_id: activityId });
+    if (error) console.warn('mark_activity_seen', error.message);
+  } catch (err) {
+    console.warn('mark_activity_seen failed', err);
+  }
+}
 function isSharedActivity(activityId) {
   return (membersFor(activityId).length + invitesFor(activityId).length) > 1
     || membersFor(activityId).length > 1;
 }
 function displayNameFor(userId) {
   const p = profilesById[userId];
-  if (!p) return null;
-  const name = (p.display_name || '').trim();
+  const name = (p?.display_name || '').trim();
   if (name) return name;
-  if (userId === currentUser?.id) return currentUser.email || 'You';
+  if (userId === currentUser?.id && currentUser.email) return currentUser.email;
+  if (p?.email) return p.email;
   return null;
 }
+// "Ben Langholz" -> "BL", "Ben" -> "B", "blangholz@x.com" -> "BL".
+// Two chars when we can, one when the name is a single word.
+function initialsFrom(source) {
+  const s = (source || '').trim();
+  if (!s) return '?';
+  if (s.includes('@')) {
+    const prefix = s.split('@')[0].replace(/[^a-z0-9]/gi, '');
+    return (prefix.slice(0, 2) || '?').toUpperCase();
+  }
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return parts[0][0].toUpperCase();
+}
 function ownerChipEl(userId, { size = '' } = {}) {
-  const name = displayNameFor(userId) || '';
-  const initial = (name || '?').slice(0, 1).toUpperCase();
+  const label = displayNameFor(userId) || '';
+  const initials = initialsFrom(label);
   const hue = hashHue(userId || '');
   const cls = 'owner-chip' + (size ? ` owner-chip-${size}` : '');
   return h('span', {
     class: cls,
-    title: name || 'Member',
+    title: label || 'Member',
     style: `background: hsl(${hue} 58% 42%); color: #fff;`,
-    'aria-label': name || 'Member',
-  }, initial);
+    'aria-label': label || 'Member',
+  }, initials);
+}
+
+// Unread-count badge — sits to the LEFT of the activity emoji on a tab when
+// other members have added gear since the user last opened the tab. Hidden on
+// the active tab (the user is already looking at it) and on tabs with zero
+// unread.
+function unreadBadgeForActivity(activityId) {
+  if (activityId === activeActivityId) return null;
+  const n = unreadCountFor(activityId);
+  if (n <= 0) return null;
+  const label = n > 99 ? '99+' : String(n);
+  return h('span', {
+    class: 'activity-tab-unread',
+    'aria-label': `${n} new ${n === 1 ? 'item' : 'items'}`,
+    title: `${n} new ${n === 1 ? 'item' : 'items'} from your crew`,
+  }, label);
+}
+
+// Facepile of overlapping member avatars — shown on tabs of shared activities.
+// 1-4 members → render all. 5+ → render first 3 + "+N" overflow chip.
+// Owner is always pinned to the front so the list "looks like" the owner's.
+function facepileForActivity(activityId) {
+  const members = membersFor(activityId);
+  if (members.length <= 1) return null;
+  const sorted = [...members].sort((a, b) => {
+    if (a.role === 'owner' && b.role !== 'owner') return -1;
+    if (b.role === 'owner' && a.role !== 'owner') return 1;
+    return (a.joined_at || '').localeCompare(b.joined_at || '');
+  });
+  const visible = sorted.length > 4 ? sorted.slice(0, 3) : sorted;
+  const overflow = sorted.length - visible.length;
+  const wrap = h('span', {
+    class: 'activity-tab-facepile',
+    'aria-label': `${sorted.length} members`,
+  });
+  for (const m of visible) wrap.appendChild(ownerChipEl(m.user_id, { size: 'xs' }));
+  if (overflow > 0) {
+    wrap.appendChild(h('span', {
+      class: 'owner-chip owner-chip-xs facepile-overflow',
+      title: `+${overflow} more`,
+    }, `+${overflow}`));
+  }
+  return wrap;
 }
 
 // ------------------------------------------------------------------
@@ -696,14 +919,21 @@ function renderTabs() {
       class: 'activity-tab' + (a.id === activeActivityId ? ' active' : ''),
       dataset: { activityId: a.id },
       role: 'tab',
-      onclick: () => { activeActivityId = a.id; render(); syncRealtimeSubscription(); },
+      onclick: () => {
+        activeActivityId = a.id;
+        render();
+        syncRealtimeSubscription();
+        markActivitySeen(a.id);
+      },
       ondblclick: () => openEditActivity(a.id),
       ondragover: handleTabDragOver,
       ondragleave: handleTabDragLeave,
       ondrop: (e) => handleTabDrop(e, a.id),
     },
+      unreadBadgeForActivity(a.id),
       a.emoji ? h('span', { class: 'activity-tab-emoji' }, a.emoji) : null,
       h('span', {}, a.name),
+      facepileForActivity(a.id),
     );
     tabs.appendChild(tab);
   }
@@ -748,7 +978,9 @@ function renderCustomFilterBar() {
   host.appendChild(addBtn);
 
   if (!filters.length) {
-    hint.textContent = 'Tap + to add (e.g. Trad, Sport)';
+    const preset = presetForActivity(activity);
+    const examples = preset ? preset.filterExamples : 'Trad, Sport';
+    hint.textContent = `Tap + to add (e.g. ${examples})`;
   } else if (active.size) {
     hint.textContent = 'Filtered';
   } else {
@@ -844,7 +1076,11 @@ function renderActivity() {
     if (passWeather(item) && passCustom(item)) visibleItems.push({ item, gear });
   }
 
-  if (!items.length || !visibleItems.length) {
+  if (!items.length) {
+    renderActivityEmptyState(activity, 'empty');
+    empty.classList.remove('hidden');
+  } else if (!visibleItems.length) {
+    renderActivityEmptyState(activity, 'filtered');
     empty.classList.remove('hidden');
   } else {
     empty.classList.add('hidden');
@@ -859,6 +1095,90 @@ function renderActivity() {
     total += (gear.weight_grams || 0) * qty;
   }
   totalEl.textContent = `Total: ${formatWeight(total)}`;
+}
+
+// Render the "#activity-empty" container based on state:
+//   reason === 'filtered' → there are items but filters hide them all
+//   reason === 'empty'    → no items yet; show smart suggestions
+function renderActivityEmptyState(activity, reason) {
+  const empty = $('#activity-empty');
+  if (!empty) return;
+  empty.innerHTML = '';
+
+  if (reason === 'filtered') {
+    empty.appendChild(h('p', {}, 'No items match the active filters.'));
+    empty.appendChild(h('p', { class: 'muted' }, 'Turn off a filter above to see the rest of the list.'));
+    return;
+  }
+
+  const { linked, generic, preset } = suggestionsForActivity(activity);
+  const hasAny = linked.length || generic.length;
+
+  if (!hasAny) {
+    empty.appendChild(h('p', {}, 'Nothing packed yet.'));
+    empty.appendChild(h('p', { class: 'muted' }, 'Drag gear from the library into this list.'));
+    return;
+  }
+
+  const label = preset ? preset.label : 'this trip';
+  empty.appendChild(h('p', { class: 'empty-suggestions-title' },
+    `Suggestions for ${label}`));
+  empty.appendChild(h('p', { class: 'muted empty-suggestions-sub' },
+    'Tap + to add. These aren\'t packed yet.'));
+
+  if (linked.length) {
+    const linkedWrap = h('div', { class: 'suggestion-list suggestion-list-linked' });
+    for (const gear of linked) linkedWrap.appendChild(suggestionRow(activity, gear));
+    empty.appendChild(linkedWrap);
+  }
+
+  if (generic.length) {
+    if (linked.length) {
+      empty.appendChild(h('p', { class: 'muted empty-suggestions-divider' },
+        'Not in your library yet:'));
+    }
+    const genericWrap = h('div', { class: 'suggestion-list suggestion-list-generic' });
+    for (const label of generic) genericWrap.appendChild(suggestionGenericRow(label));
+    empty.appendChild(genericWrap);
+  }
+}
+
+function suggestionRow(activity, gear) {
+  const imgNode = gearImageEl(gear.image_url, { className: 'gear-image suggestion-image' });
+  const name = h('div', { class: 'suggestion-name' }, gear.name || 'Untitled');
+  const brand = gear.brand ? h('div', { class: 'suggestion-brand muted' }, gear.brand) : null;
+  const meta = h('div', { class: 'suggestion-meta' }, name, brand);
+  const addBtn = h('button', {
+    class: 'suggestion-add',
+    type: 'button',
+    title: 'Add to list',
+    'aria-label': `Add ${gear.name || 'item'} to this list`,
+    onclick: (e) => {
+      e.stopPropagation();
+      addGearToActivity(activity.id, gear.id);
+    },
+  }, '+');
+  return h('div', { class: 'suggestion-item suggestion-item-linked' }, imgNode, meta, addBtn);
+}
+
+function suggestionGenericRow(label) {
+  const icon = h('div', { class: 'suggestion-image suggestion-image-generic', 'aria-hidden': 'true' }, '✨');
+  const name = h('div', { class: 'suggestion-name' }, label);
+  const hint = h('div', { class: 'suggestion-brand muted' }, 'Add to your gear library to include');
+  const meta = h('div', { class: 'suggestion-meta' }, name, hint);
+  const addBtn = h('button', {
+    class: 'suggestion-add suggestion-add-generic',
+    type: 'button',
+    title: 'Add to your gear library',
+    'aria-label': `Add ${label} to your gear library`,
+    onclick: (e) => {
+      e.stopPropagation();
+      openAddGear();
+      const nameInput = $('#gear-name');
+      if (nameInput) { nameInput.value = label; nameInput.focus(); }
+    },
+  }, '+');
+  return h('div', { class: 'suggestion-item suggestion-item-generic' }, icon, meta, addBtn);
 }
 
 function activityItemRow(activity, item, gear, opts = {}) {
@@ -964,7 +1284,7 @@ function activityItemRow(activity, item, gear, opts = {}) {
     || (currentUser && (gear.owner_id === currentUser.id || isOwnerOf(activity.id)));
 
   const row = h('div', {
-    class: 'activity-item' + (item.packed ? ' packed' : ''),
+    class: 'activity-item' + (item.packed ? ' packed' : '') + (shared ? ' shared' : ''),
     draggable: 'true',
     dataset: { gearId: gear.id, itemId: item.id },
     role: 'button',
@@ -1077,7 +1397,9 @@ async function addGearToActivity(activityId, gearId, insertIdx) {
     return;
   }
   const items = itemsFor(activityId).slice();
-  const appendPos = items.length;
+  // Use max(position) + 1 so concurrent adds from different users don't collide
+  // on the same position value (which would make ordering non-deterministic).
+  const appendPos = items.reduce((m, it) => Math.max(m, it.position ?? -1), -1) + 1;
   const { data, error } = await supabase
     .from('activity_items')
     .insert({ activity_id: activityId, gear_id: gearId, position: appendPos, quantity: 1 })
@@ -1269,6 +1591,7 @@ function handleTabDrop(e, activityId) {
     activeActivityId = activityId;
     render();
     syncRealtimeSubscription();
+    markActivitySeen(activityId);
   }
 }
 function handleBodyDragOver(e) {
@@ -2147,7 +2470,7 @@ async function processPhotoEntry(entry, { forceMultiple = false } = {}) {
     const res = await callExtractGear({
       image: { base64, mediaType },
       mode: entry.mode || 'photo',
-      forceMultiple: forceMultiple || !IS_TOUCH,  // desktop always wants alternates
+      forceMultiple,  // confidence drives this — high → 1 candidate, else 2-3
     });
     if (mySeq !== photoSeq) return;
     const candidates = Array.isArray(res.candidates) ? res.candidates : (res.data ? [res.data] : []);
@@ -2191,6 +2514,10 @@ async function enqueuePhotos(files, { forceMultiple = false, mode = 'photo' } = 
       clearPhotoQueue();
     }
   }
+  // Lock the save button immediately — thumbnail decoding can take a few
+  // hundred ms before showCurrentPhoto runs, and we don't want the user
+  // saving an empty form during that gap.
+  $('#gear-save-btn').disabled = true;
   // First entry kicks off immediately; the rest sit pending.
   for (const f of accepted) {
     let dataUrl = '';
@@ -2733,7 +3060,7 @@ function parseEmailList(raw) {
 
 // ---- Realtime -------------------------------------------------------------
 
-function syncRealtimeSubscription() {
+async function syncRealtimeSubscription() {
   const nextId = activeActivityId;
   if (realtimeChannelActivityId === nextId) return;
   if (realtimeChannel) {
@@ -2742,9 +3069,22 @@ function syncRealtimeSubscription() {
   }
   realtimeChannelActivityId = nextId;
   if (!nextId) return;
+  // Belt-and-suspenders: make sure the realtime socket is using the current
+  // user's JWT (not the anon key). v2 auto-propagates after onAuthStateChange,
+  // but calling here guards against races where we subscribe before that
+  // propagation has flushed.
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (token && typeof supabase.realtime?.setAuth === 'function') {
+      supabase.realtime.setAuth(token);
+    }
+  } catch (err) {
+    console.warn('[realtime] setAuth failed', err);
+  }
   const aid = nextId;
-  realtimeChannel = supabase
-    .channel(`activity:${aid}`)
+  const channel = supabase
+    .channel(`activity-${aid}`)
     .on('postgres_changes',
       { event: '*', schema: 'public', table: 'activity_items', filter: `activity_id=eq.${aid}` },
       (payload) => onRealtimeItemChange(aid, payload))
@@ -2757,10 +3097,14 @@ function syncRealtimeSubscription() {
     .on('postgres_changes',
       { event: 'UPDATE', schema: 'public', table: 'activities', filter: `id=eq.${aid}` },
       (payload) => onRealtimeActivityChange(aid, payload))
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log(`[realtime] channel activity-${aid} status=${status}`, err || '');
+    });
+  realtimeChannel = channel;
 }
 
 async function onRealtimeItemChange(aid, payload) {
+  console.log('[realtime] item change', payload.eventType, payload.new?.id || payload.old?.id);
   const items = itemsByActivity[aid] || (itemsByActivity[aid] = []);
   if (payload.eventType === 'INSERT') {
     if (!items.some((i) => i.id === payload.new.id)) items.push(payload.new);
@@ -2775,7 +3119,14 @@ async function onRealtimeItemChange(aid, payload) {
   } else if (payload.eventType === 'DELETE') {
     itemsByActivity[aid] = items.filter((i) => i.id !== payload.old.id);
   }
-  if (aid === activeActivityId) renderActivity();
+  if (aid === activeActivityId) {
+    renderActivity();
+    // The user is actively looking at this list — keep the badge cleared
+    // even as new items stream in.
+    if (payload.eventType === 'INSERT' && payload.new.added_by !== currentUser?.id) {
+      markActivitySeen(aid);
+    }
+  }
 }
 
 async function onRealtimeMemberChange(aid, payload) {
@@ -2825,11 +3176,19 @@ async function applyPendingInvite() {
     showInviteBanner(error, { kind: 'error', autoHide: 6000 });
     return;
   }
+  if (data?.activity_name || data?.inviter_name) {
+    onboardingContext = {
+      activityName: data.activity_name || null,
+      activityEmoji: data.activity_emoji || null,
+      inviterName: data.inviter_name || null,
+    };
+  }
   await loadAll();
   if (data?.activity_id) {
     activeActivityId = data.activity_id;
     render();
     syncRealtimeSubscription();
+    markActivitySeen(data.activity_id);
     const a = activities.find((x) => x.id === data.activity_id);
     showInviteBanner(
       data.already_accepted
@@ -2848,6 +3207,7 @@ function applyPendingOpenActivity() {
     activeActivityId = id;
     render();
     syncRealtimeSubscription();
+    markActivitySeen(id);
   }
 }
 
@@ -2870,6 +3230,99 @@ function showInviteBanner(text, { kind = '', autoHide = 0 } = {}) {
   }
 }
 
+// ------------------------------------------------------------------
+// First-time onboarding: capture display_name before the user sees the app.
+// Triggered whenever a signed-in user has a blank profile.display_name.
+// ------------------------------------------------------------------
+async function maybePromptForOnboarding() {
+  if (!currentUser) return;
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('display_name')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+  if (error) { console.warn('[onboarding] profile fetch failed', error); return; }
+  const name = (profile?.display_name || '').trim();
+  const email = (currentUser.email || '').trim().toLowerCase();
+  const emailLocal = email.split('@')[0] || '';
+  const looksAutoDerived =
+    !!name && !!email && (name.toLowerCase() === email || name.toLowerCase() === emailLocal);
+  console.log('[onboarding] profile display_name=', JSON.stringify(profile?.display_name),
+    'email=', email, 'looksAutoDerived=', looksAutoDerived);
+  if (name && !looksAutoDerived) return;
+  showOnboardingModal();
+}
+
+function showOnboardingModal() {
+  const modal = $('#onboarding-modal');
+  const titleEl = $('#onboarding-title');
+  const subEl = $('#onboarding-sub');
+  const input = $('#onboarding-name');
+  const error = $('#onboarding-error');
+  const submit = $('#onboarding-submit');
+  if (!modal || !titleEl || !subEl || !input) return;
+
+  if (onboardingContext?.activityName) {
+    const emoji = onboardingContext.activityEmoji ? `${onboardingContext.activityEmoji} ` : '';
+    const listLabel = `"${emoji}${onboardingContext.activityName}"`;
+    const inviter = onboardingContext.inviterName || 'Someone';
+    titleEl.textContent = `${inviter} invited you to pack ${listLabel}`;
+    subEl.textContent = "Just one quick step before you get to your packing list.";
+  } else {
+    titleEl.textContent = 'Welcome to PackUpGear!';
+    subEl.textContent = "Just one quick step before we get you packing.";
+  }
+  if (error) error.textContent = '';
+  input.value = '';
+  if (submit) { submit.disabled = false; submit.textContent = "Let's go →"; }
+
+  modal.classList.remove('hidden');
+  document.body.classList.add('modal-open');
+  setTimeout(() => input.focus(), 50);
+}
+
+async function handleOnboardingSubmit(e) {
+  e.preventDefault();
+  if (!currentUser) return;
+  const input = $('#onboarding-name');
+  const error = $('#onboarding-error');
+  const submit = $('#onboarding-submit');
+  if (!input) return;
+  const name = (input.value || '').trim();
+  if (!name) {
+    if (error) error.textContent = 'Please enter a name.';
+    input.focus();
+    return;
+  }
+  if (name.length > 80) {
+    if (error) error.textContent = 'Keep it to 80 characters.';
+    return;
+  }
+
+  if (submit) { submit.disabled = true; submit.textContent = 'Saving…'; }
+  if (error) error.textContent = '';
+  const { error: upErr } = await supabase
+    .from('profiles')
+    .update({ display_name: name })
+    .eq('id', currentUser.id);
+  if (upErr) {
+    console.warn('[onboarding] update failed', upErr);
+    if (error) error.textContent = "Couldn't save your name. Try again.";
+    if (submit) { submit.disabled = false; submit.textContent = "Let's go →"; }
+    return;
+  }
+  profilesById[currentUser.id] = {
+    id: currentUser.id,
+    display_name: name,
+    email: currentUser.email || null,
+  };
+  const modal = $('#onboarding-modal');
+  if (modal) modal.classList.add('hidden');
+  document.body.classList.remove('modal-open');
+  onboardingContext = null;
+  render();
+}
+
 function consumeInviteParamsFromUrl() {
   const url = new URL(window.location.href);
   let changed = false;
@@ -2884,6 +3337,10 @@ function consumeInviteParamsFromUrl() {
 // Wiring
 // ------------------------------------------------------------------
 function wire() {
+  // Onboarding form (shown for users with a blank display_name)
+  const onboardingForm = $('#onboarding-form');
+  if (onboardingForm) onboardingForm.addEventListener('submit', handleOnboardingSubmit);
+
   // Mobile mode init + tab bar
   setMobileMode(mobileMode);
   for (const tab of document.querySelectorAll('.mobile-tab[data-mobile-mode]')) {
@@ -3048,8 +3505,14 @@ function wire() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      $$('.modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
-      document.body.classList.remove('modal-open');
+      // Onboarding is unskippable — users must enter a name to proceed.
+      $$('.modal:not(.hidden)').forEach((m) => {
+        if (m.id === 'onboarding-modal') return;
+        m.classList.add('hidden');
+      });
+      if (!document.querySelector('.modal:not(.hidden)')) {
+        document.body.classList.remove('modal-open');
+      }
     }
   });
 
@@ -3195,6 +3658,9 @@ function wire() {
     e.preventDefault();
     dragDepth = 0;
     overlay.classList.remove('active');
+    // When the gear modal is open, the in-modal dropzone handles drops.
+    // Skipping here prevents double-processing (event bubbles to window).
+    if (!$('#gear-modal').classList.contains('hidden')) return;
     const fs = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith('image/'));
     if (fs.length === 0) return;
     enqueuePhotos(fs, { mode: 'auto' });
@@ -3205,6 +3671,7 @@ function wire() {
 // Auth state + boot
 // ------------------------------------------------------------------
 async function syncDisplayName(user) {
+  console.log('[auth] user_metadata=', user?.user_metadata);
   const fullName = user?.user_metadata?.full_name;
   if (!fullName) return;
   const { data: profile } = await supabase
@@ -3220,6 +3687,9 @@ async function syncDisplayName(user) {
 
 
 async function onSignedIn(session) {
+  if (!session?.user) return;
+  if (signedInForUserId === session.user.id) return;
+  signedInForUserId = session.user.id;
   currentUser = session.user;
   $('#user-email').textContent = currentUser.email || '';
   showMain();
@@ -3253,9 +3723,15 @@ async function onSignedIn(session) {
   await applyPendingInvite();
   applyPendingOpenActivity();
   syncRealtimeSubscription();
+  await maybePromptForOnboarding();
 }
 
 function onSignedOut() {
+  signedInForUserId = null;
+  onboardingContext = null;
+  const onboardingModal = $('#onboarding-modal');
+  if (onboardingModal) onboardingModal.classList.add('hidden');
+  document.body.classList.remove('modal-open');
   currentUser = null;
   gearList = [];
   activities = [];
@@ -3263,6 +3739,7 @@ function onSignedOut() {
   customFiltersByActivity = {};
   membersByActivity = {};
   invitesByActivity = {};
+  viewsByActivity = {};
   profilesById = {};
   foreignGearById = {};
   activeActivityId = null;
