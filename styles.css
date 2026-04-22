@@ -209,6 +209,30 @@ body.modal-open #main-view { overflow: hidden; }
 }
 .auth-back:hover { color: var(--text); }
 
+@media (max-width: 600px) {
+  .auth-wrap { padding: 16px; }
+  .auth-stack { gap: 10px; max-width: 100%; }
+  .auth-hero {
+    font-size: clamp(40px, 13vw, 56px);
+    letter-spacing: -0.03em;
+  }
+  .auth-subhero {
+    font-size: 14px;
+    max-width: 30ch;
+    margin-bottom: 8px;
+  }
+  .auth-card { padding: 24px 20px; }
+  .auth-decor-item { opacity: 0.09; }
+  /* Shrink the bigger decor emojis so they don't overpower the card on phones.
+     Inline font-size styles on individual items are overridden here. */
+  .auth-decor-item[style*="56px"] { font-size: 36px !important; }
+  .auth-decor-item[style*="50px"] { font-size: 32px !important; }
+  .auth-decor-item[style*="46px"] { font-size: 30px !important; }
+  .auth-decor-item[style*="44px"] { font-size: 28px !important; }
+  .auth-decor-item[style*="38px"] { font-size: 24px !important; }
+  .auth-decor-item[style*="34px"] { font-size: 22px !important; }
+}
+
 /* ============ Status line ============ */
 .status {
   position: fixed;
