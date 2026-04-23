@@ -397,6 +397,104 @@ function emojiForItemName(name) {
   return '🎒';
 }
 
+// Rough packed-volume estimate per single unit of gear, in liters. Matches
+// the same keyword-category shape as emojiForItemName — first match wins.
+// These are deliberately coarse: the goal is to give "roughly how big a
+// bag do I need" context next to the weight total, not precision. Tune
+// the table as items misbehave. First match wins; more specific before
+// general (daypack before generic backpack, hardshell before jacket).
+function estimateVolumeLiters(name) {
+  const s = String(name || '').toLowerCase();
+  if (!s) return 1;
+  const rules = [
+    // Paragliding
+    [/\b(paraglider|paragliding|glider|wing)\b/, 18],
+    [/\b(reserve)\b/, 3],
+    [/\b(vario|radio)\b/, 0.2],
+    // Snow
+    [/\b(splitboard|snowboard|snow ?board)\b/, 15],
+    [/\b(skis?)\b/, 12],
+    [/\b(skins?)\b/, 1],
+    // Wheels / water
+    [/\b(bike|bicycle)\b/, 50],
+    [/\b(kayak|canoe|raft)\b/, 80],
+    [/\b(paddle|oar)\b/, 4],
+    [/\b(dry ?bag)\b/, 0.3],
+    [/\b(pfd|life ?jacket)\b/, 3],
+    // Climbing & ropework
+    [/\b(crash ?pad)\b/, 40],
+    [/\b(haul ?bag|crag ?bag)\b/, 4],
+    [/\b(climbing ?rope|dynamic ?rope|tagline|haul ?line|static ?line|rope)\b/, 8],
+    [/\b(cord|webbing|sling|runner)\b/, 0.3],
+    [/\b(slackline|highline)\b/, 6],
+    [/\b(quickdraws?|cams?|nuts?|hexes?|pitons?|ice ?(axe|tool)|crampons?|ascender|gri ?gri|grigri|belay ?device|carabiner|biner)\b/, 0.4],
+    [/\b(harness)\b/, 1],
+    [/\b(helmet)\b/, 3],
+    [/\b(chalk ?bag|chalk)\b/, 0.5],
+    // Bags / packs
+    [/\b(stuff ?sack|compression ?sack)\b/, 0.1],
+    [/\b(day ?pack|daypack|summit ?pack|hip ?pack|fanny ?pack)\b/, 2],
+    [/\b(duffel|rucksack|backpack)\b/, 4],
+    // Shelter & sleep
+    [/\b(tent|shelter|bothy)\b/, 6],
+    [/\b(tarp|footprint|fly|canopy)\b/, 2],
+    [/\b(hammock)\b/, 1.5],
+    [/\b(bivy|bivvy)\b/, 2],
+    [/\b(sleeping ?bag|quilt)\b/, 7],
+    [/\b(sleeping ?pad|air ?mat|mattress|pad)\b/, 3.5],
+    [/\b(pillow)\b/, 1],
+    [/\b(cot)\b/, 4],
+    // Cook
+    [/\b(jet ?boil|stove|burner|cook ?(set|pot|kit)|mess ?kit|kettle)\b/, 1.5],
+    [/\b(mug|cup|bowl|spork|spoon|fork|utensil)\b/, 0.3],
+    // Hydration
+    [/\b(hydration ?(bladder|pack|reservoir)|bladder|reservoir)\b/, 1.5],
+    [/\b(bottle|nalgene|flask|canteen|thermos|hydro ?flask)\b/, 1],
+    [/\b(filter|purifier|steripen)\b/, 0.5],
+    // Clothing — outer shells
+    [/\b(puff(y|er)?|down ?jacket|parka|anorak)\b/, 3],
+    [/\b(hard ?shell|soft ?shell|rain ?(jacket|shell)|wind ?(jacket|shell)|shell)\b/, 2],
+    [/\b(jacket|coat)\b/, 2],
+    [/\b(fleece|hoodie|sweater|pullover|vest)\b/, 1.5],
+    // Clothing — mid / base
+    [/\b(base ?layer|thermals|long ?johns)\b/, 0.8],
+    [/\b(pants?|trousers?|bibs?)\b/, 1],
+    [/\b(shorts?|kilts?)\b/, 0.5],
+    [/\b(shirt|tee|t-shirt|top|jersey|crew|henley)\b/, 0.5],
+    [/\b(leggings?)\b/, 0.6],
+    // Accessories — small
+    [/\b(gloves?|mittens?|liners?)\b/, 0.3],
+    [/\b(socks?)\b/, 0.2],
+    [/\b(beanie|cap|hat|sun ?hat|bucket|buff)\b/, 0.3],
+    [/\b(sunglass(es)?|goggles?|shades?)\b/, 0.3],
+    // Footwear
+    [/\b(boots?|approach ?shoes?)\b/, 4],
+    [/\b(trail ?runners?|sneakers?|shoes?|sandals?|clogs?|slippers?)\b/, 3],
+    // Electronics
+    [/\b(headlamp|flashlight|lantern|torch|head ?light)\b/, 0.3],
+    [/\b(camera|gopro|lens|tripod|dslr|mirrorless)\b/, 1],
+    [/\b(phone|iphone|pixel|galaxy)\b/, 0.15],
+    [/\b(battery|power ?bank|charger)\b/, 0.3],
+    [/\b(watch|altimeter|gps|inreach|garmin|suunto)\b/, 0.15],
+    // Toiletries / safety
+    [/\b(first ?aid|med ?kit|medical|bandage|moleskin|splint|tourniquet)\b/, 0.5],
+    [/\b(sunscreen|lotion|balm|lip ?balm|deet|insect ?repellent|bug ?spray|soap|shampoo|toothpaste|hand ?sanitizer)\b/, 0.15],
+    [/\b(toothbrush|lighter|multi ?tool|multitool|knife|compass)\b/, 0.1],
+    [/\b(map|atlas|guide ?book|topo)\b/, 0.3],
+    [/\b(towel|microfiber)\b/, 0.6],
+    [/\b(toilet ?paper)\b/, 0.3],
+    [/\b(umbrella)\b/, 0.5],
+    // Food / consumables
+    [/\b(food|snack|bar|gel|meal|mre|dehydrated|jerky|clif|gu)\b/, 0.3],
+    [/\b(coffee|tea|aeropress)\b/, 0.4],
+    // Trivial pocketables
+    [/\b(wallet|cash|card|id|passport|keys?|pen|pencil)\b/, 0.1],
+    [/\b(book|journal|notebook|log ?book)\b/, 0.4],
+  ];
+  for (const [re, v] of rules) if (re.test(s)) return v;
+  return 1; // unknown item — modest default
+}
+
 function gearImageEl(url, { className = '', alt = '', name = '' } = {}) {
   const fallbackEmoji = emojiForItemName(name || alt);
   if (!url) return h('div', { class: ('placeholder-img ' + className).trim() }, fallbackEmoji);
@@ -431,6 +529,16 @@ function formatWeight(grams, unit = displayUnit) {
   const v = gramsToUnit(grams, unit);
   const decimals = (unit === 'g') ? 0 : (unit === 'kg' || unit === 'lb') ? 2 : 1;
   return `${v.toFixed(decimals)} ${unit}`;
+}
+
+// Rough volume display paired with the weight total on a packing list.
+// Low volumes (<10 L) round to 0.5 L so a 0.3 L sunscreen doesn't vanish
+// into "0 L"; higher totals round to whole liters — at 40+ L the half-
+// liter precision is noise relative to heuristic error anyway.
+function formatVolume(liters) {
+  if (liters == null || isNaN(liters) || liters <= 0) return '';
+  if (liters < 10) return `~${(Math.round(liters * 2) / 2).toFixed(1)} L`;
+  return `~${Math.round(liters)} L`;
 }
 
 // ------------------------------------------------------------------
@@ -1256,11 +1364,14 @@ function renderActivity() {
   }
 
   let total = 0;
+  let totalLiters = 0;
   for (const { item, gear } of visibleItems) {
     const qty = Number.isFinite(item.quantity) && item.quantity >= 1 ? item.quantity : 1;
     total += (gear.weight_grams || 0) * qty;
+    totalLiters += estimateVolumeLiters(gear.name) * qty;
   }
-  totalEl.textContent = `Total: ${formatWeight(total)}`;
+  const vol = formatVolume(totalLiters);
+  totalEl.textContent = vol ? `Total: ${formatWeight(total)} · ${vol}` : `Total: ${formatWeight(total)}`;
 
   renderGenericSuggestions(activity);
   maybeGenerateSuggestionsFor(activity);
