@@ -2824,18 +2824,6 @@ async function extractFromUrl(url) {
   }
 }
 
-async function extractFromUrl(url) {
-  const status = $('#fetch-status');
-  status.textContent = 'Fetching product page…';
-  try {
-    const res = await callExtractGear({ url });
-    applyExtracted(res.data);
-    status.textContent = 'Filled in what we could find — review and save.';
-  } catch (err) {
-    status.textContent = err.message;
-  }
-}
-
 async function fileToResizedDataUrl(file, maxDim = 1600) {
   const dataUrl = await new Promise((resolve, reject) => {
     const r = new FileReader();
