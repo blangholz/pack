@@ -2571,7 +2571,11 @@ async function callExtractGear(payload) {
 // ------------------------------------------------------------------
 // Drill-down gear search (progressive pill-based narrowing)
 // ------------------------------------------------------------------
-const DRILLDOWN_DEBOUNCE_MS = 350;
+// Starter categories + brand lists are baked in so the first two steps render
+// instantly with no network call. Claude only runs for the *model* step (where
+// fresh recall + web search actually adds value) and for freeText that doesn't
+// map cleanly to a known category.
+const DRILLDOWN_DEBOUNCE_MS = 300;
 const drilldownCache = new Map();
 let drilldownDebounce = null;
 let drilldownSeq = 0;
@@ -2579,10 +2583,114 @@ let drilldownSeq = 0;
 // enrichment checks this to abort cleanly.
 let enrichmentSeq = 0;
 
+const GEAR_TAXONOMY = {
+  // Activity keyword → ordered list of category labels.
+  starterByActivity: {
+    backpacking: ['Tent', 'Quilt', 'Sleeping Pad', 'Backpack', 'Headlamp', 'Stove', 'Water Filter', 'Trekking Poles', 'Jacket', 'First Aid Kit', 'Insect Repellent'],
+    hiking: ['Backpack', 'Boots', 'Trekking Poles', 'Jacket', 'Headlamp', 'Water Bottle', 'First Aid Kit', 'Insect Repellent', 'Snacks'],
+    climbing: ['Harness', 'Helmet', 'Rope', 'Shoes', 'Quickdraws', 'Cams', 'Nuts', 'Belay Device', 'Chalk Bag', 'Slings', 'Carabiners'],
+    bouldering: ['Shoes', 'Chalk Bag', 'Crash Pad', 'Brush', 'Tape'],
+    skiing: ['Skis', 'Boots', 'Poles', 'Skins', 'Avy Beacon', 'Probe', 'Shovel', 'Helmet', 'Goggles'],
+    snowboarding: ['Snowboard', 'Boots', 'Bindings', 'Helmet', 'Goggles', 'Jacket'],
+    paragliding: ['Wing', 'Harness', 'Reserve', 'Helmet', 'Vario', 'Radio'],
+    highlining: ['Webbing', 'Backup', 'Leash', 'Harness', 'Helmet', 'Chalk Bag'],
+    bikepacking: ['Bike', 'Handlebar Bag', 'Frame Bag', 'Seat Pack', 'Helmet', 'Lights', 'Tools'],
+    running: ['Shoes', 'Shorts', 'Hat', 'Hydration Pack', 'Watch', 'Socks'],
+    default: ['Tent', 'Backpack', 'Sleeping Bag', 'Headlamp', 'Stove', 'Jacket', 'First Aid Kit', 'Water Bottle', 'Insect Repellent'],
+  },
+  // Category label → brand list. Keys are case-insensitive-matched by slug.
+  brandsByCategory: {
+    'Tent': ['MSR', 'Big Agnes', 'Nemo', 'REI', 'Hilleberg', 'Sea to Summit', 'Zpacks'],
+    'Quilt': ['Enlightened Equipment', 'Hammock Gear', 'Katabatic', 'Western Mountaineering', 'Nunatak'],
+    'Sleeping Bag': ['Western Mountaineering', 'Feathered Friends', 'REI', 'Marmot', 'Mountain Hardwear', 'Rab'],
+    'Sleeping Pad': ['Therm-a-Rest', 'Nemo', 'Sea to Summit', 'Big Agnes', 'Exped'],
+    'Backpack': ['Osprey', 'Gossamer Gear', 'Hyperlite Mountain Gear', 'Zpacks', 'REI', 'Deuter', 'Granite Gear'],
+    'Headlamp': ['Petzl', 'Black Diamond', 'Nitecore', 'Fenix', 'Biolite', 'Princeton Tec'],
+    'Stove': ['MSR', 'Jetboil', 'Snow Peak', 'BRS', 'Soto', 'Primus'],
+    'Water Filter': ['Sawyer', 'Katadyn', 'Platypus', 'MSR', 'Grayl'],
+    'Water Bottle': ['Nalgene', 'Hydro Flask', 'Smartwater', 'Cnoc', 'Platypus'],
+    'Trekking Poles': ['Black Diamond', 'Leki', 'Gossamer Gear', 'Mountain Laurel Designs', 'REI'],
+    'Jacket': ['Patagonia', "Arc'teryx", 'The North Face', 'Outdoor Research', 'Rab', 'Montbell'],
+    'Rain Shell': ['Patagonia', "Arc'teryx", 'Outdoor Research', 'Rab', 'Montbell'],
+    'Boots': ['Salomon', 'La Sportiva', 'Scarpa', 'Merrell', 'Lowa', 'Altra'],
+    'Footwear': ['Altra', 'Salomon', 'Hoka', 'La Sportiva', 'Scarpa', 'Merrell'],
+    'Shoes': ['La Sportiva', 'Scarpa', 'Five Ten', 'Evolv', 'Black Diamond', 'Butora'],
+    'Socks': ['Darn Tough', 'Smartwool', 'Injinji', 'Farm to Feet'],
+    'First Aid Kit': ['Adventure Medical Kits', 'Lifeline', 'Swiss Safe', 'Be Smart', 'Surviveware', 'MyMedic'],
+    'Insect Repellent': ['Sawyer', 'Ranger Ready', "Ben's", 'Repel', 'OFF!', 'Natrapel'],
+    'Hat': ['Outdoor Research', 'Patagonia', 'REI', 'Sunday Afternoons'],
+    'Snacks': ['Clif', 'Honey Stinger', 'GU', 'Skratch', 'Picky Bars'],
+    // Climbing
+    'Harness': ['Petzl', 'Black Diamond', "Arc'teryx", 'Mammut', 'Edelrid', 'CAMP'],
+    'Helmet': ['Petzl', 'Black Diamond', 'Mammut', 'CAMP', 'Edelrid', 'Smith'],
+    'Rope': ['Sterling', 'Mammut', 'Edelweiss', 'Petzl', 'Edelrid', 'Beal'],
+    'Quickdraws': ['Petzl', 'Black Diamond', 'Mammut', 'CAMP', 'DMM'],
+    'Cams': ['Black Diamond', 'Metolius', 'DMM', 'Wild Country', 'Totem'],
+    'Nuts': ['Black Diamond', 'DMM', 'Wild Country', 'Metolius'],
+    'Belay Device': ['Petzl', 'Black Diamond', 'Mammut', 'Edelrid'],
+    'Chalk Bag': ['Black Diamond', 'Petzl', 'Mammut', 'Metolius', 'Evolv'],
+    'Carabiners': ['Petzl', 'Black Diamond', 'Mammut', 'CAMP', 'DMM'],
+    'Slings': ['Mammut', 'Black Diamond', 'Petzl', 'Sterling', 'DMM'],
+    'Crash Pad': ['Black Diamond', 'Mad Rock', 'Metolius', 'Organic', 'Petzl'],
+    'Brush': ['Sublime', 'Metolius', 'Petzl'],
+    'Tape': ['Metolius', 'Ocun', 'Black Diamond'],
+    // Skiing / snow
+    'Skis': ['Salomon', 'DPS', 'Black Crows', 'K2', 'Rossignol', 'Atomic', 'Dynafit', 'Head'],
+    'Poles': ['Black Diamond', 'Leki', 'Dynafit', 'Scott'],
+    'Skins': ['Black Diamond', 'Pomoca', 'G3', 'Contour'],
+    'Avy Beacon': ['Mammut', 'BCA', 'Arva', 'Ortovox', 'Pieps'],
+    'Probe': ['BCA', 'Mammut', 'Black Diamond', 'Ortovox'],
+    'Shovel': ['BCA', 'Black Diamond', 'Mammut', 'Ortovox', 'Voile'],
+    'Goggles': ['Smith', 'Oakley', 'Anon', 'Giro', 'Dragon'],
+    'Snowboard': ['Burton', 'Jones', 'Lib Tech', 'GNU', 'Capita'],
+    'Bindings': ['Burton', 'Union', 'Now', 'Ride', 'Flux'],
+    // Paraglide
+    'Wing': ['Advance', 'Ozone', 'Gin', 'Niviuk', 'Skywalk', 'BGD'],
+    'Reserve': ['Companion', 'Gin', 'Advance', 'Ozone', 'Independence'],
+    'Vario': ['Flymaster', 'Naviter', 'Syride', 'Skytraxx'],
+    'Radio': ['Yaesu', 'Icom', 'Baofeng'],
+    // Highlining
+    'Webbing': ['Balance Community', 'Slackline Industries', 'Slacktivity', 'Raed'],
+    'Backup': ['Balance Community', 'Raed', 'Slackline Industries'],
+    'Leash': ['Balance Community', 'Raed', 'Slacktivity'],
+    // Bikepacking
+    'Bike': ['Salsa', 'Surly', 'Specialized', 'Trek', 'Kona'],
+    'Handlebar Bag': ['Revelate Designs', 'Apidura', 'Ortlieb', 'Topeak'],
+    'Frame Bag': ['Revelate Designs', 'Apidura', 'Ortlieb'],
+    'Seat Pack': ['Revelate Designs', 'Apidura', 'Ortlieb'],
+    'Lights': ['NiteRider', 'Light & Motion', 'Bontrager', 'Knog'],
+    'Tools': ['Park Tool', 'Topeak', 'Crankbrothers', 'Lezyne'],
+    'Shorts': ['Patagonia', 'The North Face', 'Nike', 'Salomon'],
+    'Hydration Pack': ['Salomon', 'Nathan', 'Osprey', 'Ultimate Direction'],
+    'Watch': ['Garmin', 'Coros', 'Suunto', 'Apple'],
+  },
+  // Aliases for mapping freeText to a canonical category. Keep lowercase.
+  categoryAliases: {
+    'bug spray': 'Insect Repellent',
+    'bug repellent': 'Insect Repellent',
+    'mosquito spray': 'Insect Repellent',
+    'deet': 'Insect Repellent',
+    'sleeping quilt': 'Quilt',
+    'backpacking stove': 'Stove',
+    'trail runners': 'Footwear',
+    'running shoes': 'Footwear',
+    'hiking boots': 'Boots',
+    'climbing shoes': 'Shoes',
+    'avalanche beacon': 'Avy Beacon',
+    'transceiver': 'Avy Beacon',
+    'first aid': 'First Aid Kit',
+    'firstaid': 'First Aid Kit',
+    'med kit': 'First Aid Kit',
+    'poles': 'Trekking Poles',
+  },
+};
+
 const drilldownState = {
   path: [],        // [{axis, value, label}]
   freeText: '',
   lastResponse: null,
+  lastAutoName: '',   // last NAME we wrote automatically; we only overwrite if still matches.
+  lastAutoBrand: '',  // same for BRAND.
 };
 
 function drilldownPathKey(path) {
@@ -2598,12 +2706,103 @@ function getDrilldownContext() {
   };
 }
 
+function guessActivityKind(context) {
+  const hay = ((context.activityName || '') + ' ' + (context.listName || '')).toLowerCase();
+  const keys = Object.keys(GEAR_TAXONOMY.starterByActivity).filter((k) => k !== 'default');
+  // Longer keywords first so "bikepacking" beats "packing".
+  keys.sort((a, b) => b.length - a.length);
+  for (const k of keys) { if (hay.includes(k)) return k; }
+  // Common synonyms
+  if (/\b(pct|at|cdt|thru[- ]?hike|appalachian|pacific crest|continental divide)\b/.test(hay)) return 'backpacking';
+  if (/\b(alpine|mountaineering|trad|sport|crag)\b/.test(hay)) return 'climbing';
+  if (/\b(bc|backcountry|skimo|touring)\b/.test(hay)) return 'skiing';
+  if (/\b(xc|mtb|gravel|cycling)\b/.test(hay)) return 'bikepacking';
+  return null;
+}
+
+function starterCategoriesForContext(context) {
+  const kind = guessActivityKind(context) || 'default';
+  return GEAR_TAXONOMY.starterByActivity[kind] || GEAR_TAXONOMY.starterByActivity.default;
+}
+
+function normalizeCategoryKey(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+function matchCategoryFromText(text) {
+  if (!text) return null;
+  const norm = normalizeCategoryKey(text);
+  if (GEAR_TAXONOMY.categoryAliases[norm]) return GEAR_TAXONOMY.categoryAliases[norm];
+  const known = Object.keys(GEAR_TAXONOMY.brandsByCategory);
+  const exact = known.find((k) => normalizeCategoryKey(k) === norm);
+  if (exact) return exact;
+  // Soft match: singularize trailing 's' ("headlamps" → "headlamp").
+  const trimmed = norm.replace(/s$/, '');
+  const soft = known.find((k) => normalizeCategoryKey(k).replace(/s$/, '') === trimmed);
+  return soft || null;
+}
+
+function brandsForCategory(category) {
+  if (!category) return null;
+  return GEAR_TAXONOMY.brandsByCategory[category] || null;
+}
+
+function capitalizeFreeText(s) {
+  const t = String(s || '').trim();
+  if (!t) return '';
+  return t.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
+function synthesizeNameFromPath(path, freeText) {
+  const cat = path.find((p) => p.axis === 'category')?.label;
+  const brand = path.find((p) => p.axis === 'brand')?.label;
+  const subtype = path.find((p) => p.axis === 'subtype')?.label;
+  const model = path.find((p) => p.axis === 'model')?.label;
+  if (model && brand) return `${brand} ${model}`;
+  if (model) return model;
+  if (brand && subtype && cat) return `${brand} ${subtype} ${cat}`;
+  if (brand && cat) return `${brand} ${cat}`;
+  if (subtype && cat) return `${subtype} ${cat}`;
+  if (cat) return cat;
+  if (freeText) return capitalizeFreeText(freeText);
+  return '';
+}
+
+// Progressive form-fill. Only overwrites fields we previously wrote ourselves
+// (tracked via lastAutoName / lastAutoBrand) so a user's manual edit is never
+// trampled — matching the "applyExtracted respects user edits" contract.
+function applyAutoFill(path, freeText) {
+  const nameField = $('#gear-name');
+  const brandField = $('#gear-brand');
+  if (!nameField || !brandField) return;
+
+  const synthName = synthesizeNameFromPath(path, freeText);
+  const currentName = nameField.value;
+  const nameWasOurs = !currentName || currentName === drilldownState.lastAutoName;
+  if (nameWasOurs && synthName) {
+    nameField.value = synthName;
+    drilldownState.lastAutoName = synthName;
+  }
+
+  const pathBrand = path.find((p) => p.axis === 'brand')?.label || '';
+  const currentBrand = brandField.value;
+  const brandWasOurs = !currentBrand || currentBrand === drilldownState.lastAutoBrand;
+  if (brandWasOurs) {
+    brandField.value = pathBrand;
+    drilldownState.lastAutoBrand = pathBrand;
+  }
+
+  updateGearPreview();
+}
+
 function resetDrilldownUI() {
   const input = $('#gear-search-input');
   if (input) input.value = '';
   drilldownState.path = [];
   drilldownState.freeText = '';
   drilldownState.lastResponse = null;
+  drilldownState.lastAutoName = '';
+  drilldownState.lastAutoBrand = '';
   drilldownSeq++;
   if (drilldownDebounce) { clearTimeout(drilldownDebounce); drilldownDebounce = null; }
   $('#drilldown-breadcrumbs').hidden = true;
@@ -2616,7 +2815,12 @@ function resetDrilldownUI() {
   const status = $('#drilldown-status');
   status.hidden = true;
   status.innerHTML = '';
-  $('#gear-search-spinner').classList.add('hidden');
+  setDrilldownBusy(false);
+}
+
+function setDrilldownBusy(on) {
+  const el = $('#gear-drilldown-progress');
+  if (el) el.classList.toggle('hidden', !on);
 }
 
 function renderBreadcrumbs() {
@@ -2642,20 +2846,14 @@ function renderBreadcrumbs() {
   });
 }
 
-function renderDrilldownPills(response) {
+function renderStaticPills(axisLabel, options, nextAxis) {
   const axis = $('#drilldown-axis');
   const label = $('#drilldown-axis-label');
   const pills = $('#drilldown-pills');
   pills.innerHTML = '';
   $('#drilldown-other-input').hidden = true;
-
-  const options = Array.isArray(response?.options) ? response.options : [];
-  if (!response?.nextAxis || !options.length) {
-    axis.hidden = true;
-    return;
-  }
   axis.hidden = false;
-  label.textContent = response.axisLabel || '';
+  label.textContent = axisLabel;
   for (const opt of options) {
     const isOther = opt.value === '__other__';
     const btn = h('button', {
@@ -2664,7 +2862,7 @@ function renderDrilldownPills(response) {
     });
     btn.appendChild(document.createTextNode(opt.label));
     if (opt.hint) btn.appendChild(h('span', { class: 'drilldown-pill-hint' }, `· ${opt.hint}`));
-    btn.addEventListener('click', () => handlePillClick(opt, response.nextAxis));
+    btn.addEventListener('click', () => handlePillClick(opt, nextAxis));
     pills.appendChild(btn);
   }
 }
@@ -2681,14 +2879,76 @@ function showDrilldownStatus(kind, html) {
   el.appendChild(text);
 }
 
+// Renders the next axis from local taxonomy. Returns true if we served it
+// client-side (no network needed), false if we need to fall through to Claude.
+function renderDrilldownFromTaxonomy() {
+  const path = drilldownState.path;
+  const freeText = drilldownState.freeText;
+  const context = getDrilldownContext();
+
+  // Starter: nothing picked, nothing typed → show categories for the activity.
+  if (!path.length && !freeText) {
+    const starters = starterCategoriesForContext(context).map((c) => ({
+      value: c, label: c,
+    }));
+    renderStaticPills('Or pick a category', starters, 'category');
+    showDrilldownStatus(null);
+    return true;
+  }
+
+  // Free text typed but no pill picked yet: if the text maps cleanly to a
+  // known category, show its brand pills. Otherwise fall through.
+  if (!path.length && freeText) {
+    const matched = matchCategoryFromText(freeText);
+    if (matched) {
+      drilldownState.path = [{ axis: 'category', value: matched, label: matched }];
+      renderBreadcrumbs();
+      applyAutoFill(drilldownState.path, freeText);
+      return renderDrilldownFromTaxonomy();
+    }
+    // Unmatched free text: show starter categories as a hint, plus an implicit
+    // "or just save as-is" affordance (the name is already filled).
+    const starters = starterCategoriesForContext(context).map((c) => ({
+      value: c, label: c,
+    }));
+    renderStaticPills('Or pick a category', starters, 'category');
+    showDrilldownStatus(
+      'success',
+      `Ready to save as <code>${escapeHtml(capitalizeFreeText(freeText))}</code> — or narrow with a pill.`,
+    );
+    return true;
+  }
+
+  // Category chosen, no brand yet: show brand pills from the local taxonomy.
+  if (path.length === 1 && path[0].axis === 'category') {
+    const brands = brandsForCategory(path[0].label) || brandsForCategory(path[0].value);
+    if (brands && brands.length) {
+      const options = brands.map((b) => ({ value: b, label: b }));
+      options.push({ value: '__other__', label: 'Other…' });
+      renderStaticPills('Brand?', options, 'brand');
+      showDrilldownStatus(null);
+      return true;
+    }
+    // No local brands for this category — let Claude handle it.
+    return false;
+  }
+
+  // Beyond category+brand, defer to Claude (model recall, subtype splits).
+  return false;
+}
+
 async function runDrilldown() {
+  // Fast path: starter + brand pills are baked in.
+  if (renderDrilldownFromTaxonomy()) {
+    setDrilldownBusy(false);
+    return;
+  }
+
   const mySeq = ++drilldownSeq;
   const path = drilldownState.path;
   const freeText = drilldownState.freeText;
   const context = getDrilldownContext();
   const key = JSON.stringify(context) + '|' + drilldownPathKey(path) + '|' + freeText;
-
-  const spinner = $('#gear-search-spinner');
 
   if (drilldownCache.has(key)) {
     const cached = drilldownCache.get(key);
@@ -2697,7 +2957,7 @@ async function runDrilldown() {
     return;
   }
 
-  spinner.classList.remove('hidden');
+  setDrilldownBusy(true);
   try {
     const res = await callExtractGear({
       drilldown: { context, path, freeText: freeText || undefined },
@@ -2710,40 +2970,45 @@ async function runDrilldown() {
     showDrilldownStatus('warn', escapeHtml(err.message || 'Search failed'));
     $('#drilldown-axis').hidden = true;
   } finally {
-    if (mySeq === drilldownSeq) spinner.classList.add('hidden');
+    if (mySeq === drilldownSeq) setDrilldownBusy(false);
   }
 }
 
 function applyDrilldownResponse(res) {
   drilldownState.lastResponse = res;
 
-  // Merge any inferredPath returned by the server (e.g. freeText "headlamp" →
-  // server inserts a {category, headlamp} breadcrumb so the UI reflects it).
+  // Server-side path inference (e.g. freeText "Petzl Actik Core" → server
+  // returns a full path it reasoned out). Apply only if the user hasn't
+  // already built up a path themselves.
   if (Array.isArray(res.inferredPath) && res.inferredPath.length && !drilldownState.path.length) {
     drilldownState.path = res.inferredPath.map((p) => ({
       axis: p.axis, value: p.value, label: p.label || p.value,
     }));
+    renderBreadcrumbs();
+    applyAutoFill(drilldownState.path, drilldownState.freeText);
   }
-
-  renderBreadcrumbs();
-
-  if (res.partialFill) applyExtracted(res.partialFill);
 
   if (res.fallbackToManual) {
     $('#drilldown-axis').hidden = true;
-    const typed = drilldownState.freeText.trim();
-    if (typed && !$('#gear-name').value) $('#gear-name').value = typed;
-    updateGearPreview();
-    const safeTyped = escapeHtml(typed || 'this item');
+    // Name field already has capitalized freeText from applyAutoFill.
+    const safeTyped = escapeHtml(capitalizeFreeText(drilldownState.freeText) || 'this item');
     showDrilldownStatus(
       'warn',
-      `Couldn't find a match — fill in brand, weight, and details below to save as <code>${safeTyped}</code>.`,
+      `Not a match in our catalog — ready to save as <code>${safeTyped}</code>. Add brand / weight / details below if you want.`,
     );
     return;
   }
 
   if (res.canAutofill && res.autofillData) {
+    // Clear the synthesized placeholders so applyExtracted can write the
+    // proper product name / brand over them.
+    const nameField = $('#gear-name');
+    const brandField = $('#gear-brand');
+    if (nameField.value === drilldownState.lastAutoName) nameField.value = '';
+    if (brandField.value === drilldownState.lastAutoBrand) brandField.value = '';
     applyExtracted(res.autofillData);
+    drilldownState.lastAutoName = nameField.value;
+    drilldownState.lastAutoBrand = brandField.value;
     $('#drilldown-axis').hidden = true;
     showDrilldownStatus(
       'success',
@@ -2752,8 +3017,14 @@ function applyDrilldownResponse(res) {
     return;
   }
 
+  // Non-terminal pill step from Claude (e.g. model list).
   showDrilldownStatus(null);
-  renderDrilldownPills(res);
+  const options = Array.isArray(res.options) ? res.options : [];
+  if (res.nextAxis && options.length) {
+    renderStaticPills(res.axisLabel || '', options, res.nextAxis);
+  } else {
+    $('#drilldown-axis').hidden = true;
+  }
 }
 
 function handlePillClick(option, axis) {
@@ -2769,6 +3040,8 @@ function handlePillClick(option, axis) {
   drilldownState.path.push({ axis, value: option.value, label: option.label });
   drilldownState.freeText = '';
   $('#gear-search-input').value = '';
+  renderBreadcrumbs();
+  applyAutoFill(drilldownState.path, '');
   runDrilldown();
 }
 
@@ -2776,6 +3049,8 @@ function handleBreadcrumbRemove(index) {
   drilldownState.path = drilldownState.path.slice(0, index);
   drilldownState.freeText = '';
   $('#gear-search-input').value = '';
+  renderBreadcrumbs();
+  applyAutoFill(drilldownState.path, '');
   runDrilldown();
 }
 
@@ -2785,6 +3060,13 @@ function handleSearchInput() {
   drilldownState.freeText = v;
   drilldownState.path = [];
   renderBreadcrumbs();
+  // Fill NAME immediately so Save is usable even before any drilldown resolves.
+  applyAutoFill(drilldownState.path, v);
+  if (!v) {
+    // Back to starter pills, no API call needed.
+    renderDrilldownFromTaxonomy();
+    return;
+  }
   drilldownDebounce = setTimeout(() => { runDrilldown(); }, DRILLDOWN_DEBOUNCE_MS);
 }
 
@@ -2797,6 +3079,8 @@ function handleOtherSubmit() {
   drilldownState.path.push({ axis, value: val, label: val });
   wrap.hidden = true;
   input.value = '';
+  renderBreadcrumbs();
+  applyAutoFill(drilldownState.path, '');
   runDrilldown();
 }
 
@@ -2804,6 +3088,18 @@ function handleOtherCancel() {
   const wrap = $('#drilldown-other-input');
   wrap.hidden = true;
   $('#drilldown-other-text').value = '';
+}
+
+// User typed directly in NAME/BRAND → release auto-fill control for that field.
+function onManualNameEdit() {
+  if ($('#gear-name').value !== drilldownState.lastAutoName) {
+    drilldownState.lastAutoName = '__user_edited__';
+  }
+}
+function onManualBrandEdit() {
+  if ($('#gear-brand').value !== drilldownState.lastAutoBrand) {
+    drilldownState.lastAutoBrand = '__user_edited__';
+  }
 }
 
 async function extractFromUrl(url) {
@@ -6486,6 +6782,8 @@ function wire() {
   ['gear-name', 'gear-brand', 'gear-weight', 'gear-image'].forEach((id) => {
     $('#' + id).addEventListener('input', updateGearPreview);
   });
+  $('#gear-name').addEventListener('input', onManualNameEdit);
+  $('#gear-brand').addEventListener('input', onManualBrandEdit);
   $('#gear-preview-img-remove').addEventListener('click', () => {
     $('#gear-image').value = '';
     updateGearPreview();

@@ -482,10 +482,7 @@
           <div class="section-label">① Search or describe</div>
           <div class="drilldown-panel" id="gear-drilldown">
             <div class="field gear-search-field">
-              <div class="input-row gear-search-row">
-                <input id="gear-search-input" type="search" autocomplete="off" placeholder="What are you adding? (e.g. headlamp, skis)" />
-                <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
-              </div>
+              <input id="gear-search-input" class="drilldown-search-input" type="search" autocomplete="off" placeholder="What are you adding? (e.g. headlamp, bug spray)" />
             </div>
             <div id="drilldown-breadcrumbs" class="drilldown-breadcrumbs" hidden></div>
             <div id="drilldown-axis" class="drilldown-axis" hidden>
@@ -583,6 +580,10 @@
 
       <footer class="modal-footer">
         <div class="spacer"></div>
+        <span id="gear-drilldown-progress" class="drilldown-progress hidden" role="status" aria-live="polite">
+          <span class="drilldown-progress-spinner" aria-hidden="true"></span>
+          <span class="drilldown-progress-label">Looking up options…</span>
+        </span>
         <button id="gear-skip-btn" class="btn btn-ghost hidden" type="button">Skip this photo</button>
         <button id="gear-delete-btn" class="btn btn-danger hidden">Delete</button>
         <button id="gear-save-btn" class="btn btn-primary">Save</button>
