@@ -2211,7 +2211,7 @@ function resetGearForm() {
   $('#gear-delete-btn').classList.add('hidden');
   $('#fetch-status').textContent = '';
   resetScreenshotUI();
-  resetGearSearchUI();
+  resetDrilldownUI();
   setIdentifyPhotoStatus(null);
   $('#gear-save-btn').disabled = false;
   $('#gear-save-btn').textContent = '＋ Add to library';
@@ -2332,6 +2332,8 @@ function openAddGear() {
   showModal('gear-modal');
   // Focus synchronously inside the user gesture so iOS Safari brings up the keyboard.
   $('#gear-search-input').focus();
+  // Load starter pills for the current activity context.
+  runDrilldown();
 }
 
 function openEditGear(id) {
@@ -2567,145 +2569,258 @@ async function callExtractGear(payload) {
 }
 
 // ------------------------------------------------------------------
-// Gear search (autocomplete)
+// Drill-down gear search (progressive pill-based narrowing)
 // ------------------------------------------------------------------
-const SEARCH_DEBOUNCE_MS = 500;
-const SEARCH_MIN_CHARS = 3;
-const searchCache = new Map();
-let searchDebounce = null;
-let searchSeq = 0;
+const DRILLDOWN_DEBOUNCE_MS = 350;
+const drilldownCache = new Map();
+let drilldownDebounce = null;
+let drilldownSeq = 0;
 // Incremented when the user saves the gear modal — in-flight foreground
 // enrichment checks this to abort cleanly.
 let enrichmentSeq = 0;
 
-function resetGearSearchUI() {
+const drilldownState = {
+  path: [],        // [{axis, value, label}]
+  freeText: '',
+  lastResponse: null,
+};
+
+function drilldownPathKey(path) {
+  return path.map((p) => `${p.axis}:${p.value}`).join('>');
+}
+
+function getDrilldownContext() {
+  const activity = activities.find((a) => a.id === activeActivityId);
+  if (!activity) return {};
+  return {
+    activityName: activity.name || null,
+    listName: activity.description || null,
+  };
+}
+
+function resetDrilldownUI() {
   const input = $('#gear-search-input');
   if (input) input.value = '';
-  hideGearSuggestions();
-  $('#gear-search-status').textContent = '';
+  drilldownState.path = [];
+  drilldownState.freeText = '';
+  drilldownState.lastResponse = null;
+  drilldownSeq++;
+  if (drilldownDebounce) { clearTimeout(drilldownDebounce); drilldownDebounce = null; }
+  $('#drilldown-breadcrumbs').hidden = true;
+  $('#drilldown-breadcrumbs').innerHTML = '';
+  $('#drilldown-axis').hidden = true;
+  $('#drilldown-axis-label').textContent = '';
+  $('#drilldown-pills').innerHTML = '';
+  $('#drilldown-other-input').hidden = true;
+  $('#drilldown-other-text').value = '';
+  const status = $('#drilldown-status');
+  status.hidden = true;
+  status.innerHTML = '';
   $('#gear-search-spinner').classList.add('hidden');
-  searchSeq++;
 }
 
-function hideGearSuggestions() {
-  const box = $('#gear-search-suggestions');
-  box.innerHTML = '';
-  box.classList.add('hidden');
-}
-
-function renderGearSuggestions(items) {
-  const box = $('#gear-search-suggestions');
-  box.innerHTML = '';
-  if (!items.length) {
-    const empty = h('div', { class: 'gear-search-empty' }, 'No matches — try a more specific query.');
-    box.appendChild(empty);
-    box.classList.remove('hidden');
+function renderBreadcrumbs() {
+  const row = $('#drilldown-breadcrumbs');
+  row.innerHTML = '';
+  if (!drilldownState.path.length) {
+    row.hidden = true;
     return;
   }
-  for (const item of items) {
-    const btn = h('button', { type: 'button', class: 'gear-suggestion', role: 'option' });
-    const body = h('div', { class: 'gear-suggestion-body' });
-    body.appendChild(h('div', { class: 'gear-suggestion-name' }, item.name || '(unnamed)'));
-    const metaParts = [];
-    if (item.brand) metaParts.push(item.brand);
-    if (item.weightGrams != null) {
-      const v = gramsToUnit(item.weightGrams, displayUnit);
-      metaParts.push(displayUnit === 'g' ? `${Math.round(v)} g` : `${v.toFixed(2)} ${displayUnit}`);
-    }
-    if (item.quantity && item.quantity > 1) metaParts.push(`${item.quantity}-pack`);
-    if (metaParts.length) body.appendChild(h('div', { class: 'gear-suggestion-meta' }, metaParts.join(' · ')));
-    btn.appendChild(body);
-    btn.addEventListener('click', () => pickGearSuggestion(item));
-    box.appendChild(btn);
-  }
-  box.classList.remove('hidden');
+  row.hidden = false;
+  drilldownState.path.forEach((step, i) => {
+    const chip = h('span', { class: 'drilldown-chip' });
+    chip.appendChild(document.createTextNode(step.label || step.value));
+    const x = h('button', {
+      type: 'button',
+      class: 'drilldown-chip-remove',
+      'aria-label': `Remove ${step.label || step.value}`,
+      title: 'Remove',
+    }, '×');
+    x.addEventListener('click', () => handleBreadcrumbRemove(i));
+    chip.appendChild(x);
+    row.appendChild(chip);
+  });
 }
 
-async function runGearSearch(query) {
-  const mySeq = ++searchSeq;
-  const status = $('#gear-search-status');
+function renderDrilldownPills(response) {
+  const axis = $('#drilldown-axis');
+  const label = $('#drilldown-axis-label');
+  const pills = $('#drilldown-pills');
+  pills.innerHTML = '';
+  $('#drilldown-other-input').hidden = true;
+
+  const options = Array.isArray(response?.options) ? response.options : [];
+  if (!response?.nextAxis || !options.length) {
+    axis.hidden = true;
+    return;
+  }
+  axis.hidden = false;
+  label.textContent = response.axisLabel || '';
+  for (const opt of options) {
+    const isOther = opt.value === '__other__';
+    const btn = h('button', {
+      type: 'button',
+      class: 'drilldown-pill' + (isOther ? ' is-other' : ''),
+    });
+    btn.appendChild(document.createTextNode(opt.label));
+    if (opt.hint) btn.appendChild(h('span', { class: 'drilldown-pill-hint' }, `· ${opt.hint}`));
+    btn.addEventListener('click', () => handlePillClick(opt, response.nextAxis));
+    pills.appendChild(btn);
+  }
+}
+
+function showDrilldownStatus(kind, html) {
+  const el = $('#drilldown-status');
+  if (!kind) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.className = 'drilldown-status ' + (kind === 'success' ? 'is-success' : 'is-warn');
+  el.innerHTML = '';
+  el.appendChild(h('span', { class: 'drilldown-status-icon' }, kind === 'success' ? '✓' : 'ⓘ'));
+  const text = h('span', { class: 'drilldown-status-text' });
+  text.innerHTML = html;
+  el.appendChild(text);
+}
+
+async function runDrilldown() {
+  const mySeq = ++drilldownSeq;
+  const path = drilldownState.path;
+  const freeText = drilldownState.freeText;
+  const context = getDrilldownContext();
+  const key = JSON.stringify(context) + '|' + drilldownPathKey(path) + '|' + freeText;
+
   const spinner = $('#gear-search-spinner');
 
-  if (searchCache.has(query)) {
-    const cached = searchCache.get(query);
-    if (mySeq !== searchSeq) return;
-    renderGearSuggestions(cached);
-    status.textContent = cached.length ? '' : 'No matches.';
+  if (drilldownCache.has(key)) {
+    const cached = drilldownCache.get(key);
+    if (mySeq !== drilldownSeq) return;
+    applyDrilldownResponse(cached);
     return;
   }
 
   spinner.classList.remove('hidden');
-  status.textContent = 'Searching the web…';
   try {
-    const res = await callExtractGear({ query });
-    if (mySeq !== searchSeq) return;
-    const suggestions = Array.isArray(res.suggestions) ? res.suggestions : [];
-    searchCache.set(query, suggestions);
-    renderGearSuggestions(suggestions);
-    status.textContent = suggestions.length ? '' : 'No matches — try a more specific query.';
+    const res = await callExtractGear({
+      drilldown: { context, path, freeText: freeText || undefined },
+    });
+    if (mySeq !== drilldownSeq) return;
+    drilldownCache.set(key, res);
+    applyDrilldownResponse(res);
   } catch (err) {
-    if (mySeq !== searchSeq) return;
-    status.textContent = err.message || 'Search failed';
-    hideGearSuggestions();
+    if (mySeq !== drilldownSeq) return;
+    showDrilldownStatus('warn', escapeHtml(err.message || 'Search failed'));
+    $('#drilldown-axis').hidden = true;
   } finally {
-    if (mySeq === searchSeq) spinner.classList.add('hidden');
+    if (mySeq === drilldownSeq) spinner.classList.add('hidden');
   }
 }
 
-function onGearSearchInput() {
-  const query = $('#gear-search-input').value.trim();
-  if (searchDebounce) { clearTimeout(searchDebounce); searchDebounce = null; }
-  if (query.length < SEARCH_MIN_CHARS) {
-    searchSeq++;
-    hideGearSuggestions();
-    $('#gear-search-status').textContent = '';
-    $('#gear-search-spinner').classList.add('hidden');
+function applyDrilldownResponse(res) {
+  drilldownState.lastResponse = res;
+
+  // Merge any inferredPath returned by the server (e.g. freeText "headlamp" →
+  // server inserts a {category, headlamp} breadcrumb so the UI reflects it).
+  if (Array.isArray(res.inferredPath) && res.inferredPath.length && !drilldownState.path.length) {
+    drilldownState.path = res.inferredPath.map((p) => ({
+      axis: p.axis, value: p.value, label: p.label || p.value,
+    }));
+  }
+
+  renderBreadcrumbs();
+
+  if (res.partialFill) applyExtracted(res.partialFill);
+
+  if (res.fallbackToManual) {
+    $('#drilldown-axis').hidden = true;
+    const typed = drilldownState.freeText.trim();
+    if (typed && !$('#gear-name').value) $('#gear-name').value = typed;
+    updateGearPreview();
+    const safeTyped = escapeHtml(typed || 'this item');
+    showDrilldownStatus(
+      'warn',
+      `Couldn't find a match — fill in brand, weight, and details below to save as <code>${safeTyped}</code>.`,
+    );
     return;
   }
-  searchDebounce = setTimeout(() => runGearSearch(query), SEARCH_DEBOUNCE_MS);
+
+  if (res.canAutofill && res.autofillData) {
+    applyExtracted(res.autofillData);
+    $('#drilldown-axis').hidden = true;
+    showDrilldownStatus(
+      'success',
+      "Got it — filled in what we know. Edit below if anything's off.",
+    );
+    return;
+  }
+
+  showDrilldownStatus(null);
+  renderDrilldownPills(res);
 }
 
-async function pickGearSuggestion(item) {
-  applyExtracted(item);
-  hideGearSuggestions();
-  $('#gear-search-input').value = item.name || '';
-  const mySeq = ++enrichmentSeq;
-  setPreviewLoading(true);
-  $('#gear-search-status').textContent = 'Fetching thumbnail… you can save anytime.';
+function handlePillClick(option, axis) {
+  if (option.value === '__other__') {
+    const wrap = $('#drilldown-other-input');
+    const input = $('#drilldown-other-text');
+    wrap.hidden = false;
+    wrap.dataset.axis = axis;
+    input.value = '';
+    input.focus();
+    return;
+  }
+  drilldownState.path.push({ axis, value: option.value, label: option.label });
+  drilldownState.freeText = '';
+  $('#gear-search-input').value = '';
+  runDrilldown();
+}
 
-  let merged = { ...item };
+function handleBreadcrumbRemove(index) {
+  drilldownState.path = drilldownState.path.slice(0, index);
+  drilldownState.freeText = '';
+  $('#gear-search-input').value = '';
+  runDrilldown();
+}
+
+function handleSearchInput() {
+  const v = $('#gear-search-input').value.trim();
+  if (drilldownDebounce) { clearTimeout(drilldownDebounce); drilldownDebounce = null; }
+  drilldownState.freeText = v;
+  drilldownState.path = [];
+  renderBreadcrumbs();
+  drilldownDebounce = setTimeout(() => { runDrilldown(); }, DRILLDOWN_DEBOUNCE_MS);
+}
+
+function handleOtherSubmit() {
+  const wrap = $('#drilldown-other-input');
+  const input = $('#drilldown-other-text');
+  const axis = wrap.dataset.axis;
+  const val = input.value.trim();
+  if (!axis || !val) return;
+  drilldownState.path.push({ axis, value: val, label: val });
+  wrap.hidden = true;
+  input.value = '';
+  runDrilldown();
+}
+
+function handleOtherCancel() {
+  const wrap = $('#drilldown-other-input');
+  wrap.hidden = true;
+  $('#drilldown-other-text').value = '';
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+async function extractFromUrl(url) {
+  const status = $('#fetch-status');
+  status.textContent = 'Fetching product page…';
   try {
-    if (item.url) {
-      try {
-        const res = await callExtractGear({ url: item.url });
-        if (mySeq !== enrichmentSeq) return;
-        if (res.data) {
-          merged = { ...merged, ...res.data };
-          applyExtracted(merged);
-        }
-      } catch (_) { /* fall through to identity */ }
-    }
-    if (mySeq !== enrichmentSeq) return;
-    if (!$('#gear-image').value && item.name) {
-      const res = await callExtractGear({
-        identity: { name: item.name, brand: item.brand || null },
-      });
-      if (mySeq !== enrichmentSeq) return;
-      if (res.data) {
-        merged = { ...merged, ...res.data };
-        applyExtracted(merged);
-      }
-    }
-    if (mySeq !== enrichmentSeq) return;
-    $('#gear-search-status').textContent = $('#gear-image').value
-      ? ''
-      : 'No thumbnail found — you can still save.';
+    const res = await callExtractGear({ url });
+    applyExtracted(res.data);
+    status.textContent = 'Filled in what we could find — review and save.';
   } catch (err) {
-    if (mySeq === enrichmentSeq) {
-      $('#gear-search-status').textContent = 'Couldn\u2019t enrich: ' + err.message;
-    }
-  } finally {
-    if (mySeq === enrichmentSeq) setPreviewLoading(false);
+    status.textContent = err.message;
   }
 }
 
@@ -6025,6 +6140,31 @@ function fileToBase64(f) {
 // ------------------------------------------------------------------
 // Settings modal (desktop) + mobile Gmail upsell
 // ------------------------------------------------------------------
+// Active import CTA — surfaces what the bulk-import modal accepts (CSV,
+// screenshots, PDFs, pasted text) and which retailers we handle well, so
+// the affordance isn't hidden behind a tiny "Import" button in the library
+// header. Clicking opens the existing bulk-import modal.
+function buildImportCard() {
+  const card = h('div', { class: 'import-cta' });
+  const header = h('div', { class: 'import-cta-header' });
+  header.appendChild(h('div', { class: 'import-cta-icon' }, '📥'));
+  header.appendChild(h('div', { class: 'import-cta-title' }, 'Import gear'));
+  card.appendChild(header);
+  card.appendChild(h('p', { class: 'import-cta-body' },
+    'Drop a CSV, screenshot, or receipt PDF and we\'ll pull the items into your library. ',
+    h('span', { class: 'muted' },
+      'Works with Amazon Order Reports (CSV), screenshots of order pages, and receipt PDFs from REI, Backcountry, Patagonia, and more. You can also paste text.'),
+  ));
+  const btn = h('button', { type: 'button', class: 'btn btn-primary import-cta-btn' },
+    'Choose files or paste →');
+  btn.addEventListener('click', () => {
+    hideModal('settings-modal');
+    openBulkImport();
+  });
+  card.appendChild(btn);
+  return card;
+}
+
 function buildGmailUpsellCard() {
   const card = h('div', { class: 'gmail-upsell' });
   const header = h('div', { class: 'gmail-upsell-header' });
@@ -6056,6 +6196,7 @@ function renderSettingsModalBody() {
 
   const importSection = h('div', { class: 'settings-section' });
   importSection.appendChild(h('h4', { class: 'settings-section-title' }, 'Import'));
+  importSection.appendChild(buildImportCard());
   importSection.appendChild(buildGmailUpsellCard());
   body.appendChild(importSection);
 }
@@ -6070,6 +6211,13 @@ function renderMobileGmailUpsell() {
   if (!slot) return;
   slot.innerHTML = '';
   slot.appendChild(buildGmailUpsellCard());
+}
+
+function renderMobileImportCard() {
+  const slot = $('#mobile-import-slot');
+  if (!slot) return;
+  slot.innerHTML = '';
+  slot.appendChild(buildImportCard());
 }
 
 // ------------------------------------------------------------------
@@ -6344,13 +6492,12 @@ function wire() {
     if (!url) return;
     extractFromUrl(url);
   });
-  $('#gear-search-input').addEventListener('input', onGearSearchInput);
-  $('#gear-search-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { hideGearSuggestions(); }
-  });
-  document.addEventListener('click', (e) => {
-    const within = e.target.closest && e.target.closest('.gear-search-field');
-    if (!within) hideGearSuggestions();
+  $('#gear-search-input').addEventListener('input', handleSearchInput);
+  $('#drilldown-other-submit').addEventListener('click', handleOtherSubmit);
+  $('#drilldown-other-cancel').addEventListener('click', handleOtherCancel);
+  $('#drilldown-other-text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleOtherSubmit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); handleOtherCancel(); }
   });
   $('#gear-save-btn').addEventListener('click', handleSaveGear);
   $('#gear-delete-btn').addEventListener('click', handleDeleteGear);
@@ -6604,6 +6751,7 @@ async function onSignedIn(session) {
   $('#user-email').textContent = currentUser.email || '';
   const mobileEmailEl = $('#mobile-settings-email');
   if (mobileEmailEl) mobileEmailEl.textContent = currentUser.email || '';
+  renderMobileImportCard();
   renderMobileGmailUpsell();
   showMain();
   await syncDisplayName(currentUser);

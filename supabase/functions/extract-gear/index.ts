@@ -684,6 +684,145 @@ async function batchEnrichRows(
     .filter((r: any) => r.index >= 0);
 }
 
+// Drill-down search: given the user's path of selections (category → brand →
+// subtype → model) and/or typed text, ask Claude what to present next. Claude
+// decides whether to show more pills or whether we have enough to auto-fill.
+// Web search only runs on the terminal autofill step — intermediate calls are
+// pure reasoning, keeping pill navigation fast.
+async function drilldownStep(input: {
+  context?: { activityName?: string | null; listName?: string | null };
+  path: Array<{ axis: string; value: string; label?: string }>;
+  freeText?: string;
+}) {
+  const path = Array.isArray(input.path)
+    ? input.path.filter((p) => p && typeof p.axis === "string" && typeof p.value === "string").slice(0, 6)
+    : [];
+  const freeText = typeof input.freeText === "string" ? input.freeText.trim().slice(0, 200) : "";
+  const ctx = input.context || {};
+  const activityName = typeof ctx.activityName === "string" ? ctx.activityName.slice(0, 120) : null;
+  const listName = typeof ctx.listName === "string" ? ctx.listName.slice(0, 120) : null;
+
+  const prompt = [
+    `You help a user identify an outdoor-gear product through progressive drill-down questions.`,
+    `Given their current selections and optional context, decide what to ask next and what pill options to show.`,
+    ``,
+    `Context: ${JSON.stringify({ activityName, listName })}`,
+    `Path so far (may be empty): ${JSON.stringify(path)}`,
+    `Free text (may be empty): ${JSON.stringify(freeText)}`,
+    ``,
+    `Rules:`,
+    `1. Path empty AND freeText empty → return 8-10 starter CATEGORY options biased by context. If activityName suggests backpacking/hiking/thru-hiking → Tent, Quilt, Sleeping pad, Headlamp, Stove, Water filter, Trekking poles, Jacket, First aid. Climbing → Harness, Helmet, Rope, Shoes, Quickdraws, Cams, Belay device, Chalk bag. Skiing → Skis, Boots, Poles, Skins, Avy beacon, Probe, Shovel, Helmet. Paragliding → Wing, Harness, Reserve, Helmet, Vario, Radio. Otherwise generic: Tent, Backpack, Sleeping bag, Headlamp, Stove, Jacket, Footwear, First aid. Set nextAxis: "category", axisLabel: "Or pick a category".`,
+    `2. Path empty AND freeText matches a gear category (headlamp, tent, skis, harness, stove, etc.) → treat freeText as the picked category. Return 5-8 top brands making that category. nextAxis: "brand". axisLabel: "Brand?". Set inferredPath: [{ axis: "category", value: normalized, label: capitalized }].`,
+    `3. freeText uniquely identifies a SPECIFIC product (brand + model e.g. "Black Diamond Solution harness", "Petzl Actik Core", "MSR Hubba Hubba NX") → canAutofill: true. Return autofillIdentity: { name: "<product name>", brand: "<brand>" }. Return inferredPath reflecting what you inferred so breadcrumbs can render. No options needed.`,
+    `4. Path has [category, brand] and the product family has a meaningful sub-family split (Salomon+skis → Downhill/Backcountry/Cross-country; Black Diamond+headlamp does NOT — skip subtype) → ask subtype. nextAxis: "subtype". axisLabel: a natural question like "Discipline?" or "Type?".`,
+    `5. Path is [category, brand] (or [category, brand, subtype]) → ask model. nextAxis: "model". axisLabel: "Model?". Return 5-8 recognizable models.`,
+    `6. Path includes a model → canAutofill: true. Return autofillIdentity with the product name + brand derived from the path.`,
+    `7. Every non-terminal response: include partialFill with what's already known from path (brand picked → partialFill.brand; category+brand picked → partialFill.brand; no name-fill until model is chosen).`,
+    `8. Always include an "Other" escape option with value "__other__", label "Other…" at the END of the options array for axes: brand, subtype, model. (Skip for category — users type freely there.)`,
+    `9. If freeText is clearly not outdoor gear ("my lucky mug", "banana bread", "kitchen towel") → fallbackToManual: true, no options, no autofill.`,
+    ``,
+    `Return ONLY a JSON object — no markdown fences, no prose:`,
+    `{`,
+    `  "nextAxis": "category" | "brand" | "subtype" | "model" | null,`,
+    `  "axisLabel": string,`,
+    `  "options": [{ "value": string, "label": string, "hint": string|null }],`,
+    `  "partialFill": { "name": string|null, "brand": string|null, "notes": string|null } | null,`,
+    `  "canAutofill": boolean,`,
+    `  "autofillIdentity": { "name": string, "brand": string|null } | null,`,
+    `  "inferredPath": [{ "axis": string, "value": string, "label": string }] | null,`,
+    `  "fallbackToManual": boolean`,
+    `}`,
+  ].join("\n");
+
+  const text = await callClaude([{ role: "user", content: prompt }], 1800);
+  const raw = coerceJson(text);
+
+  const validAxes = new Set(["category", "brand", "subtype", "model"]);
+  const nextAxis: string | null = validAxes.has(raw.nextAxis) ? raw.nextAxis : null;
+  const axisLabel = typeof raw.axisLabel === "string" ? raw.axisLabel : "";
+  let options = Array.isArray(raw.options)
+    ? raw.options
+      .filter((o: any) => o && typeof o.value === "string" && typeof o.label === "string")
+      .map((o: any) => ({
+        value: o.value,
+        label: o.label,
+        hint: typeof o.hint === "string" && o.hint.trim() ? o.hint.trim() : null,
+      }))
+      .slice(0, 12)
+    : [];
+
+  // Ensure the Other escape is present for brand/subtype/model pill groups.
+  if (
+    nextAxis && ["brand", "subtype", "model"].includes(nextAxis) &&
+    !options.some((o) => o.value === "__other__")
+  ) {
+    options.push({ value: "__other__", label: "Other…", hint: null });
+  }
+
+  const pf = raw.partialFill && typeof raw.partialFill === "object" ? raw.partialFill : null;
+  const partialFill = pf
+    ? {
+      name: typeof pf.name === "string" && pf.name.trim() ? pf.name.trim() : null,
+      brand: typeof pf.brand === "string" && pf.brand.trim() ? pf.brand.trim() : null,
+      notes: typeof pf.notes === "string" && pf.notes.trim() ? pf.notes.trim() : null,
+    }
+    : null;
+
+  const inferredPath = Array.isArray(raw.inferredPath)
+    ? raw.inferredPath
+      .filter((p: any) => p && typeof p.axis === "string" && typeof p.value === "string")
+      .map((p: any) => ({
+        axis: p.axis,
+        value: p.value,
+        label: typeof p.label === "string" && p.label.trim() ? p.label.trim() : p.value,
+      }))
+    : null;
+
+  const fallbackToManual = raw.fallbackToManual === true;
+  const canAutofillFlag = raw.canAutofill === true;
+
+  let autofillData: ReturnType<typeof normalize> | null = null;
+  if (canAutofillFlag && !fallbackToManual) {
+    const ident = raw.autofillIdentity && typeof raw.autofillIdentity === "object" ? raw.autofillIdentity : null;
+    const nameFromIdent = ident && typeof ident.name === "string" && ident.name.trim() ? ident.name.trim() : null;
+    const brandFromIdent = ident && typeof ident.brand === "string" && ident.brand.trim() ? ident.brand.trim() : null;
+
+    const pathBrand = path.find((p) => p.axis === "brand")?.value
+      ?? inferredPath?.find((p) => p.axis === "brand")?.value
+      ?? null;
+    const pathModel = path.find((p) => p.axis === "model")?.value
+      ?? inferredPath?.find((p) => p.axis === "model")?.value
+      ?? null;
+
+    const productName = nameFromIdent
+      || (pathBrand && pathModel ? `${pathBrand} ${pathModel}` : null)
+      || pathModel
+      || freeText
+      || null;
+    const productBrand = brandFromIdent || pathBrand;
+
+    if (productName) {
+      try {
+        autofillData = await extractFromIdentity(productName, productBrand);
+      } catch (e) {
+        console.warn("drilldown autofill enrichment failed:", (e as Error).message);
+        autofillData = null;
+      }
+    }
+  }
+
+  return {
+    nextAxis,
+    axisLabel,
+    options,
+    partialFill,
+    canAutofill: autofillData != null,
+    autofillData,
+    inferredPath,
+    fallbackToManual,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -720,6 +859,14 @@ Deno.serve(async (req) => {
       const rows = body.batchEnrich.rows.slice(0, 10);
       const results = await batchEnrichRows(rows);
       return json({ results });
+    }
+    if (body?.drilldown && typeof body.drilldown === "object") {
+      const result = await drilldownStep({
+        context: body.drilldown.context,
+        path: body.drilldown.path,
+        freeText: body.drilldown.freeText,
+      });
+      return json(result);
     }
     if (typeof body?.query === "string" && body.query.trim().length >= 3) {
       const suggestions = await searchProducts(body.query.trim());
