@@ -22,7 +22,7 @@ const SITE_ORIGIN = 'https://packupgear.com';
 const OG_IMAGE_URL = `${SITE_ORIGIN}/og-share.png`;
 const GENERIC_TITLE = 'PackUpGear — Pack up, get out.';
 const GENERIC_DESCRIPTION =
-  'Track your gear. Build packing lists for every adventure.';
+  'Track your gear. Build packing lists for every adventure, solo, and with friends.';
 
 function escapeHtml(s) {
   return String(s ?? '')

@@ -8,11 +8,11 @@
        (e.g. someone dropping packupgear.com into iMessage). Share-link URLs
        (/?share=<token>) go through api/share-page.js which strips these
        and replaces them with list-specific ones. -->
-  <meta name="description" content="Track your gear. Build packing lists for every adventure." />
+  <meta name="description" content="Track your gear. Build packing lists for every adventure, solo, and with friends." />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="PackUpGear" />
   <meta property="og:title" content="PackUpGear — Pack up, get out." />
-  <meta property="og:description" content="Track your gear. Build packing lists for every adventure." />
+  <meta property="og:description" content="Track your gear. Build packing lists for every adventure, solo, and with friends." />
   <meta property="og:url" content="https://packupgear.com/" />
   <meta property="og:image" content="https://packupgear.com/og-share.png" />
   <meta property="og:image:width" content="1200" />
@@ -20,7 +20,7 @@
   <meta property="og:image:alt" content="PackUpGear — Pack up, get out." />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="PackUpGear — Pack up, get out." />
-  <meta name="twitter:description" content="Track your gear. Build packing lists for every adventure." />
+  <meta name="twitter:description" content="Track your gear. Build packing lists for every adventure, solo, and with friends." />
   <meta name="twitter:image" content="https://packupgear.com/og-share.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9B%B0%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="styles.css" />
@@ -68,7 +68,7 @@
       </div>
 
       <p class="auth-subhero share-landing-pitch">
-        Track your gear. Build packing lists for every adventure.
+        Track your gear. Build packing lists for every adventure, solo, and with friends.
       </p>
 
       <div class="auth-card share-landing-auth">
@@ -141,7 +141,7 @@
     </div>
     <div class="auth-stack">
       <h2 class="auth-hero">Pack up,<br>get out.</h2>
-      <p class="auth-subhero">Track your gear. Build packing lists for every adventure.</p>
+      <p class="auth-subhero">Track your gear. Build packing lists for every adventure, solo, and with friends.</p>
       <div class="auth-card">
       <div class="brand" style="justify-content: center;">
         <span class="brand-mark">⛰</span>
@@ -477,15 +477,26 @@
             <div class="identify-photo-divider"><span>or enter manually</span></div>
           </div>
 
-          <!-- Section 1: Search -->
-          <div class="section-label">① Search for a product</div>
-          <div class="field gear-search-field">
-            <div class="input-row gear-search-row">
-              <input id="gear-search-input" type="search" autocomplete="off" placeholder="e.g. Petzl Sama harness" />
-              <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
+          <!-- Section 1: Drill-down search -->
+          <div class="section-label">① Search or describe</div>
+          <div class="drilldown-panel" id="gear-drilldown">
+            <div class="field gear-search-field">
+              <div class="input-row gear-search-row">
+                <input id="gear-search-input" type="search" autocomplete="off" placeholder="What are you adding? (e.g. headlamp, skis)" />
+                <span id="gear-search-spinner" class="spinner-sm hidden" aria-hidden="true"></span>
+              </div>
             </div>
-            <div id="gear-search-suggestions" class="gear-search-suggestions hidden" role="listbox"></div>
-            <p id="gear-search-status" class="field-hint muted"></p>
+            <div id="drilldown-breadcrumbs" class="drilldown-breadcrumbs" hidden></div>
+            <div id="drilldown-axis" class="drilldown-axis" hidden>
+              <div id="drilldown-axis-label" class="drilldown-axis-label"></div>
+              <div id="drilldown-pills" class="drilldown-pills"></div>
+              <div id="drilldown-other-input" class="drilldown-other-input" hidden>
+                <input id="drilldown-other-text" type="text" placeholder="Type it in…" />
+                <button id="drilldown-other-submit" class="btn btn-secondary" type="button">Use this</button>
+                <button id="drilldown-other-cancel" class="btn btn-ghost" type="button">Cancel</button>
+              </div>
+            </div>
+            <div id="drilldown-status" class="drilldown-status" hidden></div>
           </div>
 
           <!-- Section 2: URL -->
