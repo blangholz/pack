@@ -252,6 +252,8 @@ let invitesByActivity = {};           // activity_id (owner only) -> array of pe
 let viewsByActivity = {};             // activity_id -> {last_seen_at, digest_sent_at} for current user
 let profilesById = {};                // user_id -> {id, display_name, email}
 let foreignGearById = {};             // gear_id -> gear row (for gear owned by co-members)
+let genericSuggestionsByActivity = {}; // activity_id -> array of generic_suggestions rows (Claude-seeded)
+let generatingSuggestionsFor = new Set(); // activity_ids with in-flight generate-suggestions call
 let activeActivityId = null;
 let displayUnit = localStorage.getItem(LS_UNIT_KEY) || 'g';
 let gearSearchQuery = '';
@@ -317,6 +319,28 @@ function h(tag, props = {}, ...children) {
 function escapeHost(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch { return null; }
+}
+
+// Universal generic items — always eligible for the suggestion chip row at
+// the bottom of a packing list, regardless of activity. These are things
+// where a specific brand/model rarely matters, so we don't force users to
+// go find a "real" product before adding. Filtered against the current
+// list contents so we don't re-suggest something already packed.
+const UNIVERSAL_GENERIC_ITEMS = [
+  { name: 'Sunscreen',      emoji: '🧴' },
+  { name: 'Bug spray',      emoji: '🦟' },
+  { name: 'First aid',      emoji: '🩹' },
+  { name: 'Lip balm',       emoji: '💋' },
+  { name: 'Hand sanitizer', emoji: '🧼' },
+  { name: 'Snacks',         emoji: '🍎' },
+  { name: 'Toilet paper',   emoji: '🧻' },
+  { name: 'Lighter',        emoji: '🔥' },
+];
+
+// Loose-match normalization used by the chip-queue dedupe so "SPF 50
+// Sunscreen" in the list correctly hides the "Sunscreen" universal chip.
+function normalizeGenericName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 // Pick a category-specific emoji placeholder from the item name. Generic
@@ -548,7 +572,7 @@ async function loadAll() {
   const gearQuery = myId
     ? supabase.from('gear').select('*').eq('owner_id', myId).order('created_at', { ascending: false })
     : supabase.from('gear').select('*').order('created_at', { ascending: false });
-  const [gearRes, actRes, itemRes, filterRes, memberRes, inviteRes, viewRes] = await Promise.all([
+  const [gearRes, actRes, itemRes, filterRes, memberRes, inviteRes, viewRes, suggRes] = await Promise.all([
     gearQuery,
     supabase.from('activities').select('*').order('position', { ascending: true }),
     supabase.from('activity_items').select('*').order('position', { ascending: true }),
@@ -556,6 +580,7 @@ async function loadAll() {
     supabase.from('activity_members').select('*'),
     supabase.from('activity_invites').select('*').is('accepted_at', null),
     supabase.from('activity_views').select('*'),
+    supabase.from('generic_suggestions').select('*').order('position', { ascending: true }),
   ]);
   for (const [name, res] of [
     ['gear', gearRes], ['activities', actRes], ['items', itemRes],
@@ -566,7 +591,7 @@ async function loadAll() {
   // Members + invites + views are optional (shared-activities feature). If
   // their tables are missing or unreachable, log and treat as empty rather
   // than blocking core data (gear, activities, items, filters) from loading.
-  for (const [name, res] of [['members', memberRes], ['invites', inviteRes], ['views', viewRes]]) {
+  for (const [name, res] of [['members', memberRes], ['invites', inviteRes], ['views', viewRes], ['suggestions', suggRes]]) {
     if (res.error) console.warn(`Load ${name}: ${res.error.message}`);
   }
   gearList = gearRes.data || [];
@@ -600,6 +625,10 @@ async function loadAll() {
   viewsByActivity = {};
   for (const v of viewRes.data || []) {
     viewsByActivity[v.activity_id] = v;
+  }
+  genericSuggestionsByActivity = {};
+  for (const s of suggRes?.data || []) {
+    (genericSuggestionsByActivity[s.activity_id] ||= []).push(s);
   }
   if (!activeActivityId || !activities.some((a) => a.id === activeActivityId)) {
     activeActivityId = activities[0]?.id || null;
@@ -1169,6 +1198,8 @@ function renderActivity() {
     } else {
       empty.classList.add('hidden');
     }
+    const sug = $('#generic-suggestions');
+    if (sug) { sug.innerHTML = ''; sug.hidden = true; }
     return;
   }
   const items = itemsFor(activity.id);
@@ -1230,6 +1261,9 @@ function renderActivity() {
     total += (gear.weight_grams || 0) * qty;
   }
   totalEl.textContent = `Total: ${formatWeight(total)}`;
+
+  renderGenericSuggestions(activity);
+  maybeGenerateSuggestionsFor(activity);
 }
 
 // Render the "#activity-empty" container as the zero-lists blank state:
@@ -1559,6 +1593,132 @@ function flashActivityItem(gearId) {
     );
     if (row) row.classList.remove('flash-bump');
   }, 800);
+}
+
+// ------------------------------------------------------------------
+// Generic-item suggestion chips (bottom of the packing list)
+// ------------------------------------------------------------------
+//
+// Two pools feed one row of up to 5 tappable chips:
+//   1. Universals (UNIVERSAL_GENERIC_ITEMS) — client-side, always eligible
+//      unless already on the list.
+//   2. Activity-specific — seeded by Claude via the generate-suggestions
+//      Edge Function on first open, cached in the generic_suggestions table,
+//      removed on tap. Once exhausted, only universals remain.
+//
+// Tap flow: create a plain gear row → addGearToActivity → (if Claude-sourced)
+// delete the suggestion row → re-render. The new gear lives in the tapping
+// user's library; on shared lists, co-members see it via foreign-gear. The
+// existing save-time + background thumbnail enrichment will try to find a
+// real product image for it.
+
+function genericSuggestionsFor(activityId) {
+  return genericSuggestionsByActivity[activityId] || [];
+}
+
+function computeGenericChipQueue(activity) {
+  if (!activity) return [];
+  const existingNames = new Set();
+  for (const it of itemsFor(activity.id)) {
+    const g = getGearById(it.gear_id);
+    if (g?.name) existingNames.add(normalizeGenericName(g.name));
+  }
+  const universals = UNIVERSAL_GENERIC_ITEMS
+    .filter((u) => !existingNames.has(normalizeGenericName(u.name)))
+    .map((u) => ({ source: 'universal', name: u.name, emoji: u.emoji, suggestionId: null }));
+  const claude = genericSuggestionsFor(activity.id)
+    .filter((s) => !existingNames.has(normalizeGenericName(s.name)))
+    .map((s) => ({ source: 'claude', name: s.name, emoji: s.emoji || emojiForItemName(s.name), suggestionId: s.id }));
+  return [...universals, ...claude].slice(0, 5);
+}
+
+function renderGenericSuggestions(activity) {
+  const container = $('#generic-suggestions');
+  if (!container) return;
+  container.innerHTML = '';
+  const queue = computeGenericChipQueue(activity);
+  if (!queue.length) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  container.appendChild(h('div', { class: 'generic-suggestions-label' }, 'Quick add'));
+  const row = h('div', { class: 'generic-suggestions-row' });
+  for (const chip of queue) {
+    const btn = h('button', {
+      class: 'generic-suggestion-chip',
+      type: 'button',
+      title: `Add ${chip.name}`,
+      'aria-label': `Add ${chip.name}`,
+      dataset: { source: chip.source, name: chip.name },
+      onclick: (e) => {
+        const el = e.currentTarget;
+        if (el && el.disabled) return;
+        if (el) el.disabled = true;
+        handleGenericSuggestionTap(activity.id, chip).catch((err) => {
+          console.warn('[generic-suggestion] tap failed', err);
+          if (el) el.disabled = false;
+        });
+      },
+    },
+      h('span', { class: 'chip-emoji', 'aria-hidden': 'true' }, chip.emoji || '➕'),
+      h('span', { class: 'chip-name' }, chip.name),
+    );
+    row.appendChild(btn);
+  }
+  container.appendChild(row);
+}
+
+async function handleGenericSuggestionTap(activityId, chip) {
+  if (!activityId || !chip?.name || !currentUser) return;
+  const { data: gear, error: gearErr } = await supabase
+    .from('gear')
+    .insert({ owner_id: currentUser.id, name: chip.name })
+    .select()
+    .single();
+  if (gearErr || !gear) {
+    toast(gearErr?.message || "Couldn't add that item", 'error');
+    return;
+  }
+  gearList = [gear, ...gearList];
+  await addGearToActivity(activityId, gear.id);
+  if (chip.source === 'claude' && chip.suggestionId) {
+    genericSuggestionsByActivity[activityId] =
+      genericSuggestionsFor(activityId).filter((s) => s.id !== chip.suggestionId);
+    const { error: delErr } = await supabase
+      .from('generic_suggestions')
+      .delete()
+      .eq('id', chip.suggestionId);
+    if (delErr) console.warn('[generic-suggestion] delete failed', delErr.message);
+  }
+  // Even generic items benefit from the background thumbnail hunter.
+  try { backgroundEnrichThumbnail(gear); } catch (_) {}
+  render();
+}
+
+// Called from renderActivity whenever we paint a list. First-open of an
+// activity (owner + empty cache) kicks off a Claude generation; everyone
+// else just waits for the rows to show up. The guard prevents re-firing on
+// every keystroke / realtime tick.
+function maybeGenerateSuggestionsFor(activity) {
+  if (!activity || !currentUser) return;
+  if (activity.owner_id !== currentUser.id) return; // avoid N members each firing
+  if (genericSuggestionsFor(activity.id).length > 0) return;
+  if (generatingSuggestionsFor.has(activity.id)) return;
+  generatingSuggestionsFor.add(activity.id);
+  (async () => {
+    try {
+      const { data, error } = await callEdgeFunction('generate-suggestions', { activity_id: activity.id });
+      if (error) { console.warn('[generic-suggestion] generate failed', error); return; }
+      const rows = Array.isArray(data?.suggestions) ? data.suggestions : [];
+      if (rows.length) {
+        genericSuggestionsByActivity[activity.id] = rows;
+        if (activity.id === activeActivityId) render();
+      }
+    } finally {
+      generatingSuggestionsFor.delete(activity.id);
+    }
+  })();
 }
 
 async function addGearToActivity(activityId, gearId, insertIdx) {
@@ -3263,6 +3423,7 @@ async function handleDeleteActivity() {
   delete customFiltersByActivity[editingActivityId];
   delete membersByActivity[editingActivityId];
   delete invitesByActivity[editingActivityId];
+  delete genericSuggestionsByActivity[editingActivityId];
   if (activeActivityId === editingActivityId) {
     activeActivityId = activities[0]?.id || null;
   }
@@ -3506,6 +3667,7 @@ async function handleLeaveActivity() {
   delete customFiltersByActivity[activityId];
   delete membersByActivity[activityId];
   delete invitesByActivity[activityId];
+  delete genericSuggestionsByActivity[activityId];
   if (activeActivityId === activityId) activeActivityId = activities[0]?.id || null;
   hideModal('share-modal');
   hideModal('activity-modal');
@@ -4106,6 +4268,7 @@ function onGlobalActivitiesChange(payload) {
     delete membersByActivity[id];
     delete invitesByActivity[id];
     delete viewsByActivity[id];
+    delete genericSuggestionsByActivity[id];
     if (activeActivityId === id) {
       activeActivityId = activities[0]?.id || null;
       syncRealtimeSubscription();
@@ -4155,6 +4318,7 @@ async function onGlobalMembersChange(payload) {
       delete customFiltersByActivity[aid];
       delete membersByActivity[aid];
       delete viewsByActivity[aid];
+      delete genericSuggestionsByActivity[aid];
       if (activeActivityId === aid) {
         activeActivityId = activities[0]?.id || null;
         syncRealtimeSubscription();
@@ -6363,6 +6527,8 @@ function onSignedOut() {
   viewsByActivity = {};
   profilesById = {};
   foreignGearById = {};
+  genericSuggestionsByActivity = {};
+  generatingSuggestionsFor = new Set();
   activeActivityId = null;
   shareModalActivityId = null;
   if (realtimeChannel) { try { supabase.removeChannel(realtimeChannel); } catch {} }

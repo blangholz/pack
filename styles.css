@@ -3780,3 +3780,57 @@ body[data-view-mode="admin"] #admin-view { display: flex; }
 .gmail-upsell .btn { align-self: flex-start; }
 
 #settings-btn { font-size: 16px; }
+
+/* Generic suggestion chips — rendered at the bottom of the packing list so
+   users can tap-add brandless items (hat, sunscreen, first aid, …) without
+   typing. Queue of up to 5 chips, refills from universals + Claude pool. */
+.generic-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 20px 18px;
+  border-top: 1px dashed var(--border);
+  margin-top: 6px;
+}
+.generic-suggestions[hidden] { display: none; }
+.generic-suggestions-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.generic-suggestions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.generic-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.08s, opacity 0.12s;
+}
+.generic-suggestion-chip:hover { background: var(--bg-hover); border-color: var(--accent); }
+.generic-suggestion-chip:active { transform: scale(0.97); }
+.generic-suggestion-chip[disabled] { opacity: 0.55; cursor: wait; }
+.generic-suggestion-chip .chip-emoji { font-size: 15px; line-height: 1; }
+.generic-suggestion-chip .chip-name { font-weight: 500; }
+
+@media (max-width: 820px) {
+  .generic-suggestions { padding: 12px 14px 16px; }
+  .generic-suggestion-chip {
+    min-height: 44px;
+    padding: 8px 14px;
+    font-size: 14px;
+  }
+  .generic-suggestion-chip .chip-emoji { font-size: 17px; }
+}

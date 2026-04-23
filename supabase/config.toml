@@ -399,6 +399,11 @@ allow_dynamic_registration = false
 # requirement and does not touch user data — it only proxies to Claude.
 verify_jwt = false
 
+[functions.generate-suggestions]
+# Same ES256 JWT issue as extract-gear. requireAuth() + is_activity_member()
+# inside the function gate access to the activity before any Claude call.
+verify_jwt = false
+
 [functions.share-activity]
 # Same ES256 JWT issue as extract-gear. The function re-validates the caller's
 # token against auth.v1.user and enforces activity ownership before sending
