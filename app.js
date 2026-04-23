@@ -2806,12 +2806,6 @@ function handleOtherCancel() {
   $('#drilldown-other-text').value = '';
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
-
 async function extractFromUrl(url) {
   const status = $('#fetch-status');
   status.textContent = 'Fetching product page…';
