@@ -1729,18 +1729,21 @@ function genericSuggestionsFor(activityId) {
 
 function computeGenericChipQueue(activity) {
   if (!activity) return [];
-  const existingNames = new Set();
-  for (const it of itemsFor(activity.id)) {
-    const g = getGearById(it.gear_id);
-    if (g?.name) existingNames.add(normalizeGenericName(g.name));
-  }
+  // Chips persist regardless of what's already on the list — tapping the
+  // same chip repeatedly just bumps the list quantity (addGearToActivity
+  // auto-increments). Ben wanted these to always be available at the
+  // bottom so he can add as many as he wants without hunting.
   const universals = UNIVERSAL_GENERIC_ITEMS
-    .filter((u) => !existingNames.has(normalizeGenericName(u.name)))
     .map((u) => ({ source: 'universal', name: u.name, emoji: u.emoji, suggestionId: null }));
   const claude = genericSuggestionsFor(activity.id)
-    .filter((s) => !existingNames.has(normalizeGenericName(s.name)))
     .map((s) => ({ source: 'claude', name: s.name, emoji: s.emoji || emojiForItemName(s.name), suggestionId: s.id }));
-  return [...universals, ...claude].slice(0, 5);
+  // Cap at 5. When Claude has activity-specific items, reserve 2 slots for
+  // them so the longer universals list doesn't squeeze them out entirely.
+  const MAX_CHIPS = 5;
+  if (!claude.length) return universals.slice(0, MAX_CHIPS);
+  const claudeSlots = Math.min(2, claude.length);
+  const universalSlots = MAX_CHIPS - claudeSlots;
+  return [...universals.slice(0, universalSlots), ...claude.slice(0, claudeSlots)];
 }
 
 function renderGenericSuggestions(activity) {
@@ -1782,16 +1785,27 @@ function renderGenericSuggestions(activity) {
 
 async function handleGenericSuggestionTap(activityId, chip) {
   if (!activityId || !chip?.name || !currentUser) return;
-  const { data: gear, error: gearErr } = await supabase
-    .from('gear')
-    .insert({ owner_id: currentUser.id, name: chip.name })
-    .select()
-    .single();
-  if (gearErr || !gear) {
-    toast(gearErr?.message || "Couldn't add that item", 'error');
-    return;
+  // Reuse an existing library row when the user already has one under the
+  // same normalized name — without this, repeat chip taps would spawn
+  // duplicate "Sunscreen"/"Bug spray" rows in the library instead of just
+  // bumping the list quantity.
+  const normalized = normalizeGenericName(chip.name);
+  let gear = gearList.find((g) =>
+    g.owner_id === currentUser.id && normalizeGenericName(g.name) === normalized,
+  );
+  if (!gear) {
+    const { data, error: gearErr } = await supabase
+      .from('gear')
+      .insert({ owner_id: currentUser.id, name: chip.name })
+      .select()
+      .single();
+    if (gearErr || !data) {
+      toast(gearErr?.message || "Couldn't add that item", 'error');
+      return;
+    }
+    gear = data;
+    gearList = [gear, ...gearList];
   }
-  gearList = [gear, ...gearList];
   await addGearToActivity(activityId, gear.id);
   if (chip.source === 'claude' && chip.suggestionId) {
     genericSuggestionsByActivity[activityId] =
