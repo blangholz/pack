@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mockup — Photo / screenshot loading state</title>
+<style>
+/* === App tokens (copied from pack/styles.css) === */
+:root {
+  --bg: #0f1115;
+  --bg-elev: #171a21;
+  --bg-elev-2: #1f232c;
+  --bg-hover: #242935;
+  --border: #2a2f3a;
+  --border-strong: #3a4150;
+  --text: #e6e9ef;
+  --text-dim: #9aa3b2;
+  --text-muted: #6b7280;
+  --accent: #8b9dff;
+  --accent-hover: #a4b3ff;
+  --accent-text: #0f1115;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 4px 20px rgba(0,0,0,0.4);
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.25);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7fa;
+    --bg-elev: #ffffff;
+    --bg-elev-2: #fafbfd;
+    --bg-hover: #eef0f5;
+    --border: #e2e5eb;
+    --border-strong: #c9cfd9;
+    --text: #1a1d23;
+    --text-dim: #5b6270;
+    --text-muted: #8a92a1;
+    --accent: #4c5fd5;
+    --accent-hover: #3a4bc0;
+    --accent-text: #ffffff;
+    --shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  }
+}
+
+/* === Mockup chrome === */
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+.mockup-bar {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+}
+.mockup-bar h1 {
+  font-size: 13px; font-weight: 600; margin: 0;
+  color: var(--text-dim); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.mockup-bar-spacer { flex: 1; min-width: 12px; }
+.state-pill {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.state-pill:hover { background: var(--bg-hover); color: var(--text); }
+.state-pill.active {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+.note {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+/* === Two-viewport layout === */
+.viewports {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  gap: 28px;
+  padding: 28px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .viewports { grid-template-columns: 1fr; }
+}
+.viewport-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.desktop-frame {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  min-height: 800px;
+  position: relative;
+}
+.mobile-frame-wrap { display: flex; flex-direction: column; align-items: flex-start; }
+.mobile-frame {
+  width: 375px;
+  height: 812px;
+  background: var(--bg);
+  border: 8px solid #2a2f3a;
+  border-radius: 36px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: var(--shadow);
+}
+.mobile-frame::before {
+  content: "";
+  position: absolute; top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 120px; height: 22px;
+  background: #2a2f3a;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
+  z-index: 100;
+}
+
+/* === Modal styles (replicating pack's modal) === */
+.modal-panel {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 640px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.desktop-frame .modal-panel { margin: 0 auto; max-height: 740px; }
+.mobile-frame .modal-panel {
+  max-height: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+  max-width: 100%;
+}
+.modal-header {
+  display: flex; align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.modal-header h3 { font-size: 16px; flex: 1; }
+.icon-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  width: 30px; height: 30px;
+  border-radius: var(--radius-sm);
+  font-size: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+.modal-body {
+  padding: 18px;
+  overflow-y: auto;
+  flex: 1;
+  position: relative;
+  min-height: 0;
+}
+.modal-footer {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+.spacer { flex: 1; }
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.btn:hover { background: var(--bg-hover); }
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text); }
+.btn-secondary { background: var(--bg-elev-2); }
+
+/* Section labels */
+.section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin: 18px 0 8px;
+}
+.section-label:first-child { margin-top: 0; }
+
+/* Identify-photo button (mobile only) */
+.identify-photo-section { margin-bottom: 14px; }
+.identify-photo-btn {
+  width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.identify-photo-icon { font-size: 20px; }
+.identify-photo-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+}
+.identify-photo-divider::before,
+.identify-photo-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* Screenshot dropzone */
+.screenshot-dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  padding: 18px;
+  background: var(--bg-elev-2);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.screenshot-dropzone:hover { border-color: var(--accent); }
+.dropzone-idle { text-align: center; }
+.dropzone-icon { font-size: 28px; margin-bottom: 6px; }
+.dropzone-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.dropzone-sub { font-size: 11px; color: var(--text-muted); }
+
+/* Form fields */
+.field { margin-bottom: 12px; }
+.field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.field input, .field textarea {
+  width: 100%;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.field input:focus, .field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.input-row { display: flex; gap: 8px; }
+.input-row input { flex: 1; }
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.form-grid .full { grid-column: 1 / -1; }
+.field-hint { font-size: 11px; color: var(--text-muted); margin: 4px 0 0; }
+
+/* === The new big loading overlay === */
+.modal-loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg-elev) 78%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  text-align: center;
+  animation: overlay-fade-in 0.18s ease-out;
+}
+@keyframes overlay-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.overlay-photo-frame {
+  position: relative;
+  width: 160px; height: 160px;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 24px;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+.overlay-photo-frame img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.overlay-scan-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    transparent,
+    var(--accent) 20%,
+    var(--accent) 80%,
+    transparent);
+  box-shadow: 0 0 18px var(--accent), 0 0 38px var(--accent);
+  animation: scan-line 1.6s ease-in-out infinite;
+}
+@keyframes scan-line {
+  0%   { top: 0%; }
+  50%  { top: calc(100% - 3px); }
+  100% { top: 0%; }
+}
+.overlay-photo-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent) 18%, transparent) 0%,
+    transparent 30%,
+    transparent 70%,
+    color-mix(in srgb, var(--accent) 18%, transparent) 100%);
+  pointer-events: none;
+  animation: overlay-pulse 2.4s ease-in-out infinite;
+}
+@keyframes overlay-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 1; }
+}
+.overlay-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+}
+.overlay-sub {
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 20px;
+  max-width: 360px;
+}
+.overlay-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  align-items: flex-start;
+  text-align: left;
+}
+.overlay-step {
+  display: flex; align-items: center; gap: 10px;
+  opacity: 0.4;
+  transition: opacity 0.3s ease, color 0.3s ease;
+}
+.overlay-step.active {
+  opacity: 1;
+  color: var(--text);
+}
+.overlay-step.done {
+  opacity: 1;
+  color: var(--success);
+}
+.overlay-step-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.overlay-step.active .overlay-step-dot {
+  animation: dot-pulse 1.2s ease-in-out infinite;
+  background: var(--accent);
+}
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+.overlay-cancel-btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+}
+.overlay-cancel-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* When the overlay is on, dim everything underneath visually too */
+.modal-body.is-loading > *:not(.modal-loading-overlay) {
+  filter: grayscale(0.3) opacity(0.5);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Footer also gets disabled */
+.modal-footer.is-loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Photo workflow card (post-load result) */
+.photo-workflow {
+  margin-bottom: 16px;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.photo-workflow-card {
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.photo-workflow-preview {
+  width: 88px; height: 88px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.photo-workflow-status {
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.photo-workflow-status strong { color: var(--success); }
+.photo-candidates-label {
+  font-size: 12px; color: var(--text-dim); margin: 12px 0 6px;
+}
+.photo-candidates-list {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.photo-candidate {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.photo-candidate:hover { background: var(--bg-hover); border-color: var(--accent); }
+.photo-candidate-conf {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-elev-2);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+/* Sample fake screenshot photo */
+.sample-photo {
+  width: 100%; height: 100%;
+  background:
+    radial-gradient(ellipse at 30% 30%, #4a5568 0%, transparent 50%),
+    radial-gradient(ellipse at 70% 60%, #2d3748 0%, transparent 50%),
+    linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+  position: relative;
+}
+.sample-photo::before {
+  content: "🎒";
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 64px;
+}
+.sample-screenshot {
+  width: 100%; height: 100%;
+  background: linear-gradient(180deg, #fff 0%, #f0f0f0 100%);
+  position: relative;
+  display: flex; flex-direction: column;
+  padding: 8px; box-sizing: border-box;
+  gap: 4px;
+  font-size: 6px; color: #333;
+}
+.sample-screenshot::before {
+  content: "amazon.com / orders";
+  font-weight: 600; font-size: 7px;
+}
+.sample-screenshot-row {
+  background: rgba(0,0,0,0.04);
+  height: 18px;
+  border-radius: 2px;
+  display: flex; align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  font-size: 6px;
+}
+
+/* Header drag-handle (just decorative) */
+.mobile-status-bar {
+  height: 22px;
+  background: var(--bg-elev);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 18px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  z-index: 90;
+}
+
+/* The current (subtle) loading state, for "before" comparison */
+.subtle-loading-strip {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.spinner-sm {
+  width: 12px; height: 12px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.dropzone-preview {
+  display: flex; gap: 12px; align-items: center;
+}
+.dropzone-preview img,
+.dropzone-preview .sample-screenshot {
+  width: 64px; height: 64px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+.dropzone-preview-meta { flex: 1; }
+
+</style>
+</head>
+<body>
+
+<div class="mockup-bar">
+  <h1>Photo / screenshot loading state</h1>
+  <div class="mockup-bar-spacer"></div>
+  <button class="state-pill active" data-state="1">1 · Idle (no upload)</button>
+  <button class="state-pill" data-state="2">2 · Mobile photo · analyzing</button>
+  <button class="state-pill" data-state="3">3 · Desktop screenshot · analyzing</button>
+  <button class="state-pill" data-state="4">4 · Done (candidates)</button>
+  <button class="state-pill" data-state="0">0 · Current (subtle) — for comparison</button>
+</div>
+<div class="note">
+  Click states above to switch. Desktop modal on the left, 375px mobile on the right.
+  <strong>State 0</strong> shows what's there today (small spinner inside the dropzone or under the button) — easy to miss while typing in the manual fields below.
+  <strong>States 2 & 3</strong> propose a full-modal-body overlay that disables every input until Claude returns.
+</div>
+
+<div class="viewports">
+
+  <div>
+    <div class="viewport-label">Desktop modal — Add gear</div>
+    <div class="desktop-frame">
+      <div id="desktop-modal" class="modal-panel"></div>
+    </div>
+  </div>
+
+  <div class="mobile-frame-wrap">
+    <div class="viewport-label">Mobile (375px) — Add gear</div>
+    <div class="mobile-frame">
+      <div class="mobile-status-bar">
+        <span>9:41</span>
+        <span>•••</span>
+      </div>
+      <div id="mobile-modal" class="modal-panel" style="height: calc(100% - 22px);"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const STATES = {
+  0: { variant: "subtle-current" },
+  1: { variant: "idle" },
+  2: { variant: "loading-photo" },
+  3: { variant: "loading-screenshot" },
+  4: { variant: "done-candidates" },
+};
+
+let currentState = 1;
+
+function renderModal(variant, isMobile) {
+  // === The shared shell ===
+  const showMobileIdentify = isMobile;
+  const showDesktopDropzone = !isMobile;
+
+  // Build entry-method markup
+  let entryMethods = "";
+
+  if (showMobileIdentify) {
+    entryMethods += `
+      <div class="identify-photo-section">
+        <button class="btn btn-primary identify-photo-btn">
+          <span class="identify-photo-icon">📷</span>
+          <span>Identify gear from a photo</span>
+        </button>
+        <div class="identify-photo-divider"><span>or enter manually</span></div>
+      </div>
+    `;
+  }
+
+  entryMethods += `
+    <div class="section-label">${showMobileIdentify ? "①" : "①"} Search or describe</div>
+    <div class="field">
+      <input type="search" placeholder="What are you adding? (e.g. headlamp, bug spray)" />
+    </div>
+
+    <div class="section-label">② Or paste a product URL</div>
+    <div class="field">
+      <div class="input-row">
+        <input type="url" placeholder="https://blackdiamondequipment.com/…" />
+        <button class="btn btn-secondary">Fetch</button>
+      </div>
+    </div>
+  `;
+
+  if (showDesktopDropzone) {
+    // For state 0 (subtle) and state 3 (analyzing), show preview + status inside dropzone
+    const dropState = (variant === "subtle-current" || variant === "loading-screenshot")
+      ? "preview" : "idle";
+
+    if (dropState === "preview") {
+      entryMethods += `
+        <div class="section-label">③ Or drop screenshots / photos of gear</div>
+        <div class="screenshot-dropzone">
+          <div class="dropzone-preview">
+            <div class="sample-screenshot">
+              <div class="sample-screenshot-row">Patagonia Houdini</div>
+              <div class="sample-screenshot-row">BD Momentum Harness</div>
+              <div class="sample-screenshot-row">Petzl Actik Headlamp</div>
+            </div>
+            <div class="dropzone-preview-meta">
+              <div class="subtle-loading-strip">
+                <span class="spinner-sm"></span>
+                <span>Reading the screenshot…</span>
+              </div>
+            </div>
+            <button class="btn btn-ghost" style="font-size: 11px;">Remove</button>
+          </div>
+        </div>
+      `;
+    } else {
+      entryMethods += `
+        <div class="section-label">③ Or drop screenshots / photos of gear</div>
+        <div class="screenshot-dropzone">
+          <div class="dropzone-idle">
+            <div class="dropzone-icon">🖼️</div>
+            <div class="dropzone-title">Drop a screenshot or photos of gear</div>
+            <div class="dropzone-sub">screenshots, gear photos, or both · up to 12 files · paste with ⌘V · click to choose</div>
+          </div>
+        </div>
+      `;
+    }
+  }
+
+  // Manual section
+  const manualSection = `
+    <div class="section-label">${showMobileIdentify ? "③" : "④"} Or edit details manually</div>
+    <div class="form-grid">
+      <div class="field"><label>Name</label><input type="text" placeholder="BD Solution Harness" /></div>
+      <div class="field"><label>Brand</label><input type="text" placeholder="Black Diamond" /></div>
+      <div class="field"><label>Weight (g)</label><input type="number" placeholder="347" /></div>
+      <div class="field"><label>Quantity</label><input type="number" placeholder="1" /></div>
+      <div class="field full"><label>Notes</label><textarea rows="2" placeholder="Size M, red, bought 2025"></textarea></div>
+    </div>
+  `;
+
+  // Photo workflow result card (state 4)
+  const resultCard = `
+    <div class="photo-workflow">
+      <div class="photo-workflow-card">
+        <div class="photo-workflow-preview" style="overflow:hidden;">
+          <div class="sample-photo" style="width:88px;height:88px;"></div>
+        </div>
+        <div style="flex:1;">
+          <div class="photo-workflow-status">
+            <strong>✓ Found 3 possible matches</strong>
+          </div>
+          <div class="muted" style="font-size:12px;">Pick the closest match below, or edit manually.</div>
+        </div>
+      </div>
+      <div class="photo-candidates-label">Pick the closest match:</div>
+      <div class="photo-candidates-list">
+        <div class="photo-candidate">
+          <span><strong>Black Diamond Momentum Harness</strong> · 380g</span>
+          <span class="photo-candidate-conf">92%</span>
+        </div>
+        <div class="photo-candidate">
+          <span><strong>Black Diamond Solution Harness</strong> · 347g</span>
+          <span class="photo-candidate-conf">71%</span>
+        </div>
+        <div class="photo-candidate">
+          <span><strong>Petzl Sitta Harness</strong> · 240g</span>
+          <span class="photo-candidate-conf">38%</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // The big overlay
+  const overlay = (variant === "loading-photo" || variant === "loading-screenshot") ? `
+    <div class="modal-loading-overlay">
+      <div class="overlay-photo-frame">
+        ${variant === "loading-photo"
+          ? '<div class="sample-photo"></div>'
+          : '<div class="sample-screenshot"><div class="sample-screenshot-row">Patagonia Houdini</div><div class="sample-screenshot-row">BD Momentum Harness</div><div class="sample-screenshot-row">Petzl Actik</div><div class="sample-screenshot-row">MSR PocketRocket</div></div>'
+        }
+        <div class="overlay-scan-line"></div>
+      </div>
+      <div class="overlay-title">
+        ${variant === "loading-photo" ? "Identifying your gear…" : "Reading your screenshot…"}
+      </div>
+      <div class="overlay-sub">
+        ${variant === "loading-photo"
+          ? "Looking up the brand, model, and weight from the photo."
+          : "Pulling out each item, then looking up brand, model, and weight."}
+      </div>
+      <div class="overlay-steps">
+        <div class="overlay-step done">
+          <span class="overlay-step-dot"></span>
+          <span>${variant === "loading-photo" ? "Photo received" : "Screenshot received"}</span>
+        </div>
+        <div class="overlay-step done">
+          <span class="overlay-step-dot"></span>
+          <span>${variant === "loading-photo" ? "Looking at the image…" : "Reading the items on screen…"}</span>
+        </div>
+        <div class="overlay-step active">
+          <span class="overlay-step-dot"></span>
+          <span>Looking up brand, model & weight</span>
+        </div>
+        <div class="overlay-step">
+          <span class="overlay-step-dot"></span>
+          <span>Matching against your library</span>
+        </div>
+      </div>
+      <button class="overlay-cancel-btn">Cancel</button>
+    </div>
+  ` : "";
+
+  const isLoading = variant === "loading-photo" || variant === "loading-screenshot";
+  const bodyClass = isLoading ? "modal-body is-loading" : "modal-body";
+  const footerClass = isLoading ? "modal-footer is-loading" : "modal-footer";
+
+  // Body content selection
+  let bodyContent;
+  if (variant === "done-candidates") {
+    bodyContent = resultCard + manualSection;
+  } else {
+    bodyContent = entryMethods + manualSection;
+  }
+
+  return `
+    <div class="modal-header">
+      <h3>Add gear</h3>
+      <button class="icon-btn">×</button>
+    </div>
+    <div class="${bodyClass}">
+      ${bodyContent}
+      ${overlay}
+    </div>
+    <div class="${footerClass}">
+      <div class="spacer"></div>
+      <button class="btn btn-ghost">Cancel</button>
+      <button class="btn btn-primary">Save</button>
+    </div>
+  `;
+}
+
+function renderAll() {
+  const variant = STATES[currentState].variant;
+  document.getElementById("desktop-modal").innerHTML = renderModal(variant, false);
+  document.getElementById("mobile-modal").innerHTML = renderModal(variant, true);
+  document.querySelectorAll(".state-pill").forEach(p => {
+    p.classList.toggle("active", parseInt(p.dataset.state, 10) === currentState);
+  });
+}
+
+document.querySelectorAll(".state-pill").forEach(p => {
+  p.addEventListener("click", () => {
+    currentState = parseInt(p.dataset.state, 10);
+    renderAll();
+  });
+});
+
+renderAll();
+</script>
+
+</body>
+</html>
