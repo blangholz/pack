@@ -588,6 +588,33 @@
         <button id="gear-delete-btn" class="btn btn-danger hidden">Delete</button>
         <button id="gear-save-btn" class="btn btn-primary">Save</button>
       </footer>
+
+      <!-- Full-panel loading overlay shown while a photo or screenshot is
+           being identified by Claude. Disables every input behind it; the
+           Cancel button is the only escape hatch. -->
+      <div id="gear-loading-overlay" class="gear-loading-overlay hidden" role="status" aria-live="polite">
+        <div class="gear-loading-photo-frame">
+          <img id="gear-loading-preview" alt="" />
+          <div class="gear-loading-scan-line" aria-hidden="true"></div>
+        </div>
+        <div id="gear-loading-title" class="gear-loading-title">Identifying your gear…</div>
+        <div id="gear-loading-sub" class="gear-loading-sub">Looking up the brand, model, and weight from the photo.</div>
+        <div class="gear-loading-steps" aria-hidden="true">
+          <div class="gear-loading-step done" data-step="received">
+            <span class="gear-loading-step-dot"></span>
+            <span class="gear-loading-step-label" data-label-photo="Photo received" data-label-screenshot="Screenshot received">Photo received</span>
+          </div>
+          <div class="gear-loading-step active" data-step="looking">
+            <span class="gear-loading-step-dot"></span>
+            <span class="gear-loading-step-label" data-label-photo="Looking at the image" data-label-screenshot="Reading the items on screen">Looking at the image</span>
+          </div>
+          <div class="gear-loading-step" data-step="enriching">
+            <span class="gear-loading-step-dot"></span>
+            <span class="gear-loading-step-label">Looking up brand, model &amp; weight</span>
+          </div>
+        </div>
+        <button id="gear-loading-cancel" class="gear-loading-cancel" type="button">Cancel</button>
+      </div>
     </div>
   </div>
 

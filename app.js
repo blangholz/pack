@@ -3221,6 +3221,7 @@ function clearPhotoQueue() {
   $('#gear-skip-btn').classList.add('hidden');
   document.body.classList.remove('photo-workflow-active');
   setPhotoWorkflowStatus(null);
+  setGearLoadingOverlay(null);
   $('#photo-candidates').classList.add('hidden');
   $('#photo-workflow-progress').classList.add('hidden');
   $('#photo-reidentify-btn').classList.add('hidden');
@@ -3247,6 +3248,60 @@ function setPhotoWorkflowStatus(text, { loading = false, error = false, success 
   if (error) el.classList.add('error');
   if (success) el.classList.add('success');
   el.appendChild(h('span', { class: 'photo-workflow-status-text' }, text));
+}
+
+// Full-panel loading overlay shown over #gear-modal while Claude is identifying
+// a photo or reading a screenshot. Disables every input behind it. Driven from
+// showCurrentPhoto() based on entry.status; cleared by clearPhotoQueue().
+let gearLoadingStepTimer = null;
+function setGearLoadingOverlay(entry) {
+  const overlay = $('#gear-loading-overlay');
+  const isLoading = entry && (entry.status === 'analyzing' || entry.status === 'pending');
+  if (!isLoading) {
+    overlay.classList.add('hidden');
+    if (gearLoadingStepTimer) {
+      clearTimeout(gearLoadingStepTimer);
+      gearLoadingStepTimer = null;
+    }
+    return;
+  }
+  $('#gear-loading-preview').src = entry.dataUrl || '';
+  // Copy varies by entry mode. mode='photo' is the mobile camera button (almost
+  // always a real-world gear photo); mode='auto' is the desktop dropzone (could
+  // be a screenshot of an order page or a gear photo — server classifies after
+  // upload). Step labels also flip on the data-label-* attributes.
+  const isPhotoMode = entry.mode === 'photo';
+  const titleEl = $('#gear-loading-title');
+  const subEl = $('#gear-loading-sub');
+  if (isPhotoMode) {
+    titleEl.textContent = 'Identifying your gear…';
+    subEl.textContent = 'Looking up the brand, model, and weight from the photo.';
+  } else {
+    titleEl.textContent = 'Looking up your gear…';
+    subEl.textContent = 'Reading the image and looking up brand, model, and weight.';
+  }
+  $$('.gear-loading-step-label').forEach((el) => {
+    const photoLabel = el.dataset.labelPhoto;
+    const screenshotLabel = el.dataset.labelScreenshot;
+    if (photoLabel && screenshotLabel) {
+      el.textContent = isPhotoMode ? photoLabel : screenshotLabel;
+    }
+  });
+  // Reset and re-prime the step animation. Step transitions are timer-driven
+  // because the underlying request is one round-trip — the server doesn't
+  // stream sub-steps. The timing roughly matches a typical Claude vision call.
+  $$('.gear-loading-step').forEach((s) => s.classList.remove('done', 'active'));
+  $('.gear-loading-step[data-step="received"]').classList.add('done');
+  $('.gear-loading-step[data-step="looking"]').classList.add('active');
+  if (gearLoadingStepTimer) clearTimeout(gearLoadingStepTimer);
+  gearLoadingStepTimer = setTimeout(() => {
+    if (overlay.classList.contains('hidden')) return;
+    const looking = $('.gear-loading-step[data-step="looking"]');
+    looking.classList.remove('active');
+    looking.classList.add('done');
+    $('.gear-loading-step[data-step="enriching"]').classList.add('active');
+  }, 1500);
+  overlay.classList.remove('hidden');
 }
 
 function renderPhotoProgress() {
@@ -3415,11 +3470,13 @@ function showCurrentPhoto() {
     $('#photo-candidates').classList.add('hidden');
     $('#photo-reidentify-btn').classList.add('hidden');
     $('#photo-cancel-btn').classList.remove('hidden');
+    setGearLoadingOverlay(entry);
   } else if (entry.status === 'error') {
     setPhotoWorkflowStatus(entry.error || 'Could not identify gear in that photo.', { error: true });
     $('#photo-candidates').classList.add('hidden');
     $('#photo-reidentify-btn').classList.remove('hidden');
     $('#photo-cancel-btn').classList.remove('hidden');
+    setGearLoadingOverlay(null);
     // Use the photo as a fallback thumbnail so the user can still type a name and save.
     if (!$('#gear-image').value && entry.dataUrl) {
       $('#gear-image').value = entry.dataUrl;
@@ -3438,6 +3495,7 @@ function showCurrentPhoto() {
     if (c) applyCandidateForce(c, entry.dataUrl);
     $('#photo-reidentify-btn').classList.remove('hidden');
     $('#photo-cancel-btn').classList.remove('hidden');
+    setGearLoadingOverlay(null);
   }
   updateGearSaveBtnState();
 }
@@ -6910,6 +6968,10 @@ function wire() {
       clearPhotoQueue();
       resetGearFormFields();
     }
+  });
+  // Loading overlay's Cancel button — same effect as the in-card cancel.
+  $('#gear-loading-cancel').addEventListener('click', () => {
+    $('#photo-cancel-btn').click();
   });
   $('#gear-skip-btn').addEventListener('click', () => {
     if (!isPhotoFlowActive()) return;
